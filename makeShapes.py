@@ -62,9 +62,74 @@ def make_winston(din, dout, crit_angle, width=1200, height=1200, n_points=25):
 
   return result
 
-def propagate(x, y, vx, vy, mirrors, nstep=10000):
-  for i in range(nstep):
-    pass
+def _build_segments(mirrors):
+  """Convert mirror polylines into a list of line segments."""
+  segments = []
+  for shape in mirrors:
+    x = np.asarray(shape['x'])
+    y = np.asarray(shape['y'])
+    for p1, p2 in zip(np.column_stack((x[:-1], y[:-1])),
+                      np.column_stack((x[1:], y[1:]))):
+      segments.append((p1, p2))
+  return segments
+
+
+def _ray_segment_intersection(pos, vel, p1, p2):
+  """Return distance along ray and intersection point with a segment."""
+  r = vel
+  s = p2 - p1
+  denom = r[0] * s[1] - r[1] * s[0]
+  if np.isclose(denom, 0):
+    return None
+  t = ((p1[0] - pos[0]) * s[1] - (p1[1] - pos[1]) * s[0]) / denom
+  u = ((p1[0] - pos[0]) * r[1] - (p1[1] - pos[1]) * r[0]) / denom
+  if t > 1e-9 and 0 <= u <= 1:
+    return t, p1 + u * s
+  return None
+
+
+def propagate(x, y, vx, vy, mirrors, n_bounces=20):
+  """Propagate a ray through a set of mirror segments."""
+  pos = np.array([x, y], dtype=float)
+  vel = np.array([vx, vy], dtype=float)
+  vel /= np.linalg.norm(vel)
+
+  xs = [pos[0]]
+  ys = [pos[1]]
+  segments = _build_segments(mirrors)
+
+  for _ in range(n_bounces):
+    best = None
+    best_seg = None
+    for p1, p2 in segments:
+      res = _ray_segment_intersection(pos, vel, p1, p2)
+      if res is None:
+        continue
+      t, ipt = res
+      if best is None or t < best[0]:
+        best = (t, ipt)
+        best_seg = (p1, p2)
+
+    if best is None:
+      if vel[1] < 0:  # extend ray to exit plane y=0
+        t = -pos[1] / vel[1]
+        xs.append(pos[0] + t * vel[0])
+        ys.append(0.0)
+      break
+
+    pos = best[1]
+    xs.append(pos[0])
+    ys.append(pos[1])
+
+    if pos[1] <= 0:
+      break
+
+    seg_vec = best_seg[1] - best_seg[0]
+    normal = np.array([-seg_vec[1], seg_vec[0]])
+    normal /= np.linalg.norm(normal)
+    vel = vel - 2 * np.dot(vel, normal) * normal
+
+  return np.array(xs), np.array(ys)
 
 
 if __name__ == '__main__':
@@ -88,6 +153,12 @@ if __name__ == '__main__':
   ## Draw axis
   plt.plot([-result['din'] / 2, result['din'] / 2], [0, 0], '-.k', linewidth=0.5)
   plt.plot([0, 0], [0, 1.5 * rmax], '-.k', linewidth=0.5)
+
+  ## Trace a few sample rays
+  height = max(np.max(s['y']) for s in result['shapes'])
+  for x0 in np.linspace(-result['din'] / 2 * 0.9, result['din'] / 2 * 0.9, 5):
+    xs, ys = propagate(x0, height - 1, 0, -1, result['shapes'])
+    plt.plot(xs, ys, 'r-')
 
   plt.xlim(-rmax, rmax)
   plt.ylim(-0.2 * rmax, 1.2 * rmax)
