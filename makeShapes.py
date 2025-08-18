@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def make_planar(din, dout, angle, width=1200, height=1200):
+def make_planar(din, dout, angle, width, height):
   result = {
     'name': 'planar',
     'n_walls': 4,
@@ -25,7 +25,7 @@ def make_planar(din, dout, angle, width=1200, height=1200):
   return result
 
 
-def make_winston(din, dout, crit_angle, width=1200, height=1200, n_points=25):
+def make_winston(din, dout, crit_angle, width, height, n_points=25):
   result = {
     'name': 'winston',
     'n_walls': 4,
@@ -169,13 +169,16 @@ def propagate(x, y, angle, mirrors, n_bounces=20):
 
 
 if __name__ == '__main__':
+  par_height = 1200
+  par_width = 1200
   par_din = 1200
   par_dout = 500
-  par_angle = 25
-  # par_angle = 10
+  #par_angle = 45
+  par_angle = 10
+  inc_angle = 10
 
-  result = make_planar(par_din, par_dout, par_angle)
-  # result = make_winston(par_din, par_dout, par_angle)
+  #result = make_planar(par_din, par_dout, par_angle, par_width, par_height)
+  result = make_winston(par_din, par_dout, par_angle, par_width, par_height)
   # print(result)
 
   rmax = 0
@@ -191,11 +194,11 @@ if __name__ == '__main__':
   plt.plot([0, 0], [0, 1.5 * rmax], '-.k', linewidth=0.5)
 
   ## Trace a few sample rays
-  inc_angle = 10
-  height = max(np.max(s['y']) for s in result['shapes'])
+  #height = max(np.max(s['y']) for s in result['shapes'])
   for x0 in np.linspace(-result['din'] / 2 * 0.9, result['din'] / 2 * 0.9, 7):
-    xs, ys, _ = propagate(x0, height - 1, inc_angle, result['shapes'])
-    plt.plot(xs, ys, 'r-', linewidth=0.5)
+    xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, result['shapes'])
+    color = {'exit':'b', 'entrance':'r', 'bounce_limit':'r'}
+    plt.plot(xs, ys, color[exit_type]+'-', linewidth=0.5)
 
   plt.xlim(-rmax, rmax)
   plt.ylim(-0.2 * rmax, 1.2 * rmax)
