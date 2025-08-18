@@ -22,6 +22,9 @@ def make_planar(din, dout, angle, width, height):
   result['shapes'].append({'x': [dout / 2, din / 2], 'y': [0, h]})
   result['shapes'].append({'x': [-dout / 2, -din / 2], 'y': [0, h]})
 
+  ## PMT surface at the exit plane
+  result['pmt'] = {'x': [-dout / 2, dout / 2], 'y': [0, 0]}
+
   return result
 
 
@@ -60,17 +63,20 @@ def make_winston(din, dout, crit_angle, width, height, n_points=25):
   result['shapes'].append({'x': x_coords, 'y': y_coords})
   result['shapes'].append({'x': -x_coords, 'y': y_coords})
 
+  ## PMT surface at the exit plane
+  result['pmt'] = {'x': [-dout / 2, dout / 2], 'y': [0, 0]}
+
   return result
 
-def _build_segments(mirrors):
-  """Convert mirror polylines into a list of line segments."""
+def _build_segments(shapes, label=None):
+  """Convert polylines into a list of labeled line segments."""
   segments = []
-  for shape in mirrors:
+  for shape in shapes:
     x = np.asarray(shape['x'])
     y = np.asarray(shape['y'])
     for p1, p2 in zip(np.column_stack((x[:-1], y[:-1])),
                       np.column_stack((x[1:], y[1:]))):
-      segments.append((p1, p2))
+      segments.append((p1, p2, label))
   return segments
 
 
@@ -88,8 +94,8 @@ def _ray_segment_intersection(pos, vel, p1, p2):
   return None
 
 
-def propagate(x, y, angle, mirrors, n_bounces=20):
-  """Propagate a ray through a set of mirror segments.
+def propagate(x, y, angle, mirrors, pmt=None, n_bounces=20):
+  """Propagate a ray through a set of mirror segments and a PMT surface.
 
   Parameters
   ----------
@@ -99,6 +105,8 @@ def propagate(x, y, angle, mirrors, n_bounces=20):
       Direction of the ray in degrees, measured counterclockwise from the incidence
   mirrors : sequence
       Collection of mirror shapes to intersect with.
+  pmt : dict, optional
+      Shape describing the PMT surface to treat as an exit.
   n_bounces : int, optional
       Stop after this many reflections if the ray has not exited.
 
@@ -106,7 +114,7 @@ def propagate(x, y, angle, mirrors, n_bounces=20):
   -------
   xs, ys : ndarray
       Coordinates of the ray path.
-  exit_type : {'exit', 'entrance', 'bounce_limit'}
+  exit_type : {'exit', 'entrance', 'bounce_limit', 'pmt'}
       Reason the propagation terminated.
   """
   pos = np.array([x, y], dtype=float)
@@ -115,14 +123,17 @@ def propagate(x, y, angle, mirrors, n_bounces=20):
 
   xs = [pos[0]]
   ys = [pos[1]]
-  segments = _build_segments(mirrors)
+  segments = _build_segments(mirrors, 'mirror')
+  if pmt is not None:
+    segments.extend(_build_segments([pmt], 'pmt'))
   height = max(np.max(s['y']) for s in mirrors)
   bounces = 0
 
   while True:
     best = None
     best_seg = None
-    for p1, p2 in segments:
+    best_label = None
+    for p1, p2, label in segments:
       res = _ray_segment_intersection(pos, vel, p1, p2)
       if res is None:
         continue
@@ -130,6 +141,7 @@ def propagate(x, y, angle, mirrors, n_bounces=20):
       if best is None or t < best[0]:
         best = (t, ipt)
         best_seg = (p1, p2)
+        best_label = label
 
     if best is None:
       if vel[1] < 0:  # extend ray to exit plane y=0
@@ -148,6 +160,9 @@ def propagate(x, y, angle, mirrors, n_bounces=20):
     xs.append(pos[0])
     ys.append(pos[1])
 
+    if best_label == 'pmt':
+      exit_type = 'pmt'
+      break
     if pos[1] <= 0:
       exit_type = 'exit'
       break
@@ -189,6 +204,10 @@ if __name__ == '__main__':
 
     rmax = max(np.hypot(x, y).max(), rmax)
 
+  ## Draw PMT surface
+  x, y = result['pmt']['x'], result['pmt']['y']
+  plt.plot(x, y, 'g', linewidth=2)
+
   ## Draw axis
   plt.plot([-result['din'] / 2, result['din'] / 2], [0, 0], '-.k', linewidth=0.5)
   plt.plot([0, 0], [0, 1.5 * rmax], '-.k', linewidth=0.5)
@@ -196,8 +215,8 @@ if __name__ == '__main__':
   ## Trace a few sample rays
   #height = max(np.max(s['y']) for s in result['shapes'])
   for x0 in np.linspace(-result['din'] / 2 * 0.9, result['din'] / 2 * 0.9, 7):
-    xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, result['shapes'])
-    color = {'exit':'b', 'entrance':'r', 'bounce_limit':'r'}
+    xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, result['shapes'], pmt=result['pmt'])
+    color = {'exit':'b', 'entrance':'r', 'bounce_limit':'r', 'pmt':'g'}
     plt.plot(xs, ys, color[exit_type]+'-', linewidth=0.5)
 
   plt.xlim(-rmax, rmax)
