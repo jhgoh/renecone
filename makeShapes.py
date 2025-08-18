@@ -22,9 +22,6 @@ def make_planar(din, dout, angle, width, height):
   result['shapes'].append({'x': [dout / 2, din / 2], 'y': [0, h]})
   result['shapes'].append({'x': [-dout / 2, -din / 2], 'y': [0, h]})
 
-  ## PMT surface at the exit plane
-  result['pmt'] = {'x': [-dout / 2, dout / 2], 'y': [0, 0]}
-
   return result
 
 
@@ -63,10 +60,17 @@ def make_winston(din, dout, crit_angle, width, height, n_points=25):
   result['shapes'].append({'x': x_coords, 'y': y_coords})
   result['shapes'].append({'x': -x_coords, 'y': y_coords})
 
-  ## PMT surface at the exit plane
-  result['pmt'] = {'x': [-dout / 2, dout / 2], 'y': [0, 0]}
-
   return result
+
+
+def make_pmt(dout, pmt_radius=None, n_points=25):
+  """Generate a PMT surface at the exit plane."""
+  if pmt_radius is not None:
+    x = np.linspace(-dout / 2, dout / 2, n_points)
+    sagitta = np.sqrt(pmt_radius**2 - (dout / 2)**2)
+    y = np.sqrt(pmt_radius**2 - x**2) - sagitta
+    return {'x': x, 'y': y}
+  return {'x': [-dout / 2, dout / 2], 'y': [0, 0]}
 
 def _build_segments(shapes, label=None):
   """Convert polylines into a list of labeled line segments."""
@@ -194,6 +198,7 @@ if __name__ == '__main__':
 
   #result = make_planar(par_din, par_dout, par_angle, par_width, par_height)
   result = make_winston(par_din, par_dout, par_angle, par_width, par_height)
+  result['pmt'] = make_pmt(par_dout, pmt_radius=325)
   # print(result)
 
   rmax = 0
