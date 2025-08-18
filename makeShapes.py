@@ -100,7 +100,14 @@ def propagate(x, y, angle, mirrors, n_bounces=20):
   mirrors : sequence
       Collection of mirror shapes to intersect with.
   n_bounces : int, optional
-      Maximum number of reflections to calculate.
+      Stop after this many reflections if the ray has not exited.
+
+  Returns
+  -------
+  xs, ys : ndarray
+      Coordinates of the ray path.
+  exit_type : {'exit', 'entrance', 'bounce_limit'}
+      Reason the propagation terminated.
   """
   pos = np.array([x, y], dtype=float)
   rad = np.deg2rad(angle-90)
@@ -109,8 +116,10 @@ def propagate(x, y, angle, mirrors, n_bounces=20):
   xs = [pos[0]]
   ys = [pos[1]]
   segments = _build_segments(mirrors)
+  height = max(np.max(s['y']) for s in mirrors)
+  bounces = 0
 
-  for _ in range(n_bounces):
+  while True:
     best = None
     best_seg = None
     for p1, p2 in segments:
@@ -127,6 +136,12 @@ def propagate(x, y, angle, mirrors, n_bounces=20):
         t = -pos[1] / vel[1]
         xs.append(pos[0] + t * vel[0])
         ys.append(0.0)
+        exit_type = 'exit'
+      else:  # ray escapes back out the entrance
+        t = (height - pos[1]) / vel[1]
+        xs.append(pos[0] + t * vel[0])
+        ys.append(height)
+        exit_type = 'entrance'
       break
 
     pos = best[1]
@@ -134,6 +149,10 @@ def propagate(x, y, angle, mirrors, n_bounces=20):
     ys.append(pos[1])
 
     if pos[1] <= 0:
+      exit_type = 'exit'
+      break
+    if pos[1] >= height:
+      exit_type = 'entrance'
       break
 
     seg_vec = best_seg[1] - best_seg[0]
@@ -141,7 +160,12 @@ def propagate(x, y, angle, mirrors, n_bounces=20):
     normal /= np.linalg.norm(normal)
     vel = vel - 2 * np.dot(vel, normal) * normal
 
-  return np.array(xs), np.array(ys)
+    bounces += 1
+    if bounces >= n_bounces:
+      exit_type = 'bounce_limit'
+      break
+
+  return np.array(xs), np.array(ys), exit_type
 
 
 if __name__ == '__main__':
@@ -170,7 +194,7 @@ if __name__ == '__main__':
   inc_angle = 10
   height = max(np.max(s['y']) for s in result['shapes'])
   for x0 in np.linspace(-result['din'] / 2 * 0.9, result['din'] / 2 * 0.9, 7):
-    xs, ys = propagate(x0, height - 1, inc_angle, result['shapes'])
+    xs, ys, _ = propagate(x0, height - 1, inc_angle, result['shapes'])
     plt.plot(xs, ys, 'r-', linewidth=0.5)
 
   plt.xlim(-rmax, rmax)
