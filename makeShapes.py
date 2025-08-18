@@ -88,11 +88,24 @@ def _ray_segment_intersection(pos, vel, p1, p2):
   return None
 
 
-def propagate(x, y, vx, vy, mirrors, n_bounces=20):
-  """Propagate a ray through a set of mirror segments."""
+def propagate(x, y, angle, mirrors, n_bounces=20):
+  """Propagate a ray through a set of mirror segments.
+
+  Parameters
+  ----------
+  x, y : float
+      Starting coordinates of the ray.
+  angle : float
+      Direction of the ray in degrees, measured counterclockwise from the
+      positive x-axis.
+  mirrors : sequence
+      Collection of mirror shapes to intersect with.
+  n_bounces : int, optional
+      Maximum number of reflections to calculate.
+  """
   pos = np.array([x, y], dtype=float)
-  vel = np.array([vx, vy], dtype=float)
-  vel /= np.linalg.norm(vel)
+  rad = np.deg2rad(angle)
+  vel = np.array([np.cos(rad), np.sin(rad)], dtype=float)
 
   xs = [pos[0]]
   ys = [pos[1]]
@@ -157,7 +170,7 @@ if __name__ == '__main__':
   ## Trace a few sample rays
   height = max(np.max(s['y']) for s in result['shapes'])
   for x0 in np.linspace(-result['din'] / 2 * 0.9, result['din'] / 2 * 0.9, 5):
-    xs, ys = propagate(x0, height - 1, 0, -1, result['shapes'])
+    xs, ys = propagate(x0, height - 1, -90, result['shapes'])
     plt.plot(xs, ys, 'r-')
 
   plt.xlim(-rmax, rmax)
