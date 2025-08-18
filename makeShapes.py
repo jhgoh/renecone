@@ -150,8 +150,8 @@ if __name__ == '__main__':
   par_angle = 25
   # par_angle = 10
 
-  # result = make_planar(par_din, par_dout, par_angle)
-  result = make_winston(par_din, par_dout, par_angle)
+  result = make_planar(par_din, par_dout, par_angle)
+  # result = make_winston(par_din, par_dout, par_angle)
   # print(result)
 
   rmax = 0
