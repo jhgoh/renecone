@@ -1,43 +1,43 @@
 #!/usr/bin/env python
 import numpy as np
 import matplotlib.pyplot as plt
-
+from tqdm import tqdm
 
 def make_planar(din, dout, angle, width, height):
-  result = {
+  config = {
     'name': 'planar',
     'n_walls': 4,
     'din': din,
     'dout': dout,
     'angle': angle,
-    'shapes': [],
+    'mirrors': [],
   }
 
   ## Left and right walls
-  result['shapes'].append({'x': [-width / 2, -width / 2], 'y': [0, height]})
-  result['shapes'].append({'x': [width / 2, width / 2], 'y': [0, height]})
+  config['mirrors'].append({'x': [-width / 2, -width / 2], 'y': [0, height]})
+  config['mirrors'].append({'x': [width / 2, width / 2], 'y': [0, height]})
 
   ## Main mirrors
-  h = dout * np.tan(np.deg2rad(angle))
-  result['shapes'].append({'x': [dout / 2, din / 2], 'y': [0, h]})
-  result['shapes'].append({'x': [-dout / 2, -din / 2], 'y': [0, h]})
+  h = dout * np.tan(np.deg2rad(90-angle))
+  config['mirrors'].append({'x': [dout / 2, din / 2], 'y': [0, h]})
+  config['mirrors'].append({'x': [-dout / 2, -din / 2], 'y': [0, h]})
 
-  return result
+  return config
 
 
-def make_winston(din, dout, crit_angle, width, height, n_points=25):
-  result = {
+def make_winston(din, dout, crit_angle, width, height, n_points=512):
+  config = {
     'name': 'winston',
     'n_walls': 4,
     'din': din,
     'dout': dout,
     'crit_angle': crit_angle,
-    'shapes': [],
+    'mirrors': [],
   }
 
   ## Left and right walls
-  result['shapes'].append({'x': [-width / 2, -width / 2], 'y': [0, height]})
-  result['shapes'].append({'x': [width / 2, width / 2], 'y': [0, height]})
+  config['mirrors'].append({'x': [-width / 2, -width / 2], 'y': [0, height]})
+  config['mirrors'].append({'x': [width / 2, width / 2], 'y': [0, height]})
 
   ## Main mirrors
   crit_angle = np.deg2rad(crit_angle)
@@ -62,25 +62,25 @@ def make_winston(din, dout, crit_angle, width, height, n_points=25):
   x_coords = x_coords[sel_idx]
   y_coords = y_coords[sel_idx]
 
-  result['shapes'].append({'x': x_coords, 'y': y_coords})
-  result['shapes'].append({'x': -x_coords, 'y': y_coords})
+  config['mirrors'].append({'x': x_coords, 'y': y_coords})
+  config['mirrors'].append({'x': -x_coords, 'y': y_coords})
 
-  return result
+  return config
 
 
-def make_pmt(dout, pmt_radius=None, n_points=25):
+def make_pmt(dout, pmt_curv=None, n_points=25):
   """Generate a PMT surface at the exit plane."""
-  if pmt_radius is not None:
+  if pmt_curv is not None:
     x = np.linspace(-dout / 2, dout / 2, n_points)
-    sagitta = np.sqrt(pmt_radius**2 - (dout / 2)**2)
-    y = np.sqrt(pmt_radius**2 - x**2) - sagitta
+    sagitta = np.sqrt(pmt_curv**2 - (dout / 2)**2)
+    y = np.sqrt(pmt_curv**2 - x**2) - sagitta
     return {'x': x, 'y': y}
   return {'x': [-dout / 2, dout / 2], 'y': [0, 0]}
 
-def _build_segments(shapes, label=None):
+def _build_segments(mirrors, label=None):
   """Convert polylines into a list of labeled line segments."""
   segments = []
-  for shape in shapes:
+  for shape in mirrors:
     x = np.asarray(shape['x'])
     y = np.asarray(shape['y'])
     for p1, p2 in zip(np.column_stack((x[:-1], y[:-1])),
@@ -113,7 +113,7 @@ def propagate(x, y, angle, mirrors, pmt=None, n_bounces=20):
   angle : float
       Direction of the ray in degrees, measured counterclockwise from the incidence
   mirrors : sequence
-      Collection of mirror shapes to intersect with.
+      Collection of mirror mirrors to intersect with.
   pmt : dict, optional
       Shape describing the PMT surface to treat as an exit.
   n_bounces : int, optional
@@ -196,18 +196,21 @@ if __name__ == '__main__':
   par_height = 1200
   par_width = 1200
   par_din = 1200
-  par_dout = 500
+  par_dout = 460
   #par_angle = 45
-  par_angle = 10
+  par_angle = 80
+  par_pmt_curv = 325 ## PMT curvature (325mm for R12860)
+
+  par_n_rays = 101
   inc_angle = 10
 
-  #result = make_planar(par_din, par_dout, par_angle, par_width, par_height)
-  result = make_winston(par_din, par_dout, par_angle, par_width, par_height)
-  result['pmt'] = make_pmt(par_dout, pmt_radius=325)
-  # print(result)
+  config = make_planar(par_din, par_dout, par_angle, par_width, par_height)
+  #config = make_winston(par_din, par_dout, par_angle, par_width, par_height)
+  config['pmt'] = make_pmt(par_dout, pmt_curv=par_pmt_curv)
+  # print(config)
 
   rmax = 0
-  for shape in result['shapes']:
+  for shape in config['mirrors']:
     x, y = shape['x'], shape['y']
     x, y = np.array(x), np.array(y)
     plt.plot(x, y, 'k')
@@ -215,17 +218,16 @@ if __name__ == '__main__':
     rmax = max(np.hypot(x, y).max(), rmax)
 
   ## Draw PMT surface
-  x, y = result['pmt']['x'], result['pmt']['y']
+  x, y = config['pmt']['x'], config['pmt']['y']
   plt.plot(x, y, 'g', linewidth=2)
 
   ## Draw axis
-  plt.plot([-result['din'] / 2, result['din'] / 2], [0, 0], '-.k', linewidth=0.5)
+  plt.plot([-config['din'] / 2, config['din'] / 2], [0, 0], '-.k', linewidth=0.5)
   plt.plot([0, 0], [0, 1.5 * rmax], '-.k', linewidth=0.5)
 
   ## Trace a few sample rays
-  #height = max(np.max(s['y']) for s in result['shapes'])
-  for x0 in np.linspace(-result['din'] / 2 * 0.9, result['din'] / 2 * 0.9, 9):
-    xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, result['shapes'], pmt=result['pmt'])
+  for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
+    xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], pmt=config['pmt'])
     color = {'exit':'b', 'entrance':'r', 'bounce_limit':'r', 'pmt':'g'}
     plt.plot(xs, ys, color[exit_type]+'-', linewidth=0.5)
 
@@ -234,3 +236,16 @@ if __name__ == '__main__':
   plt.gca().set_aspect('equal', adjustable='box')
   plt.show()
 
+  ## Start scanning over the incident angle
+  inc_angles = np.linspace(0, 90, 100)
+  pass_frac = np.zeros(len(inc_angles))
+  for i, inc_angle in enumerate(tqdm(inc_angles)):
+    n_pass = 0
+    for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
+      _, _, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], pmt=config['pmt'])
+      if exit_type == 'pmt':
+        n_pass += 1
+    pass_frac[i] = n_pass/par_n_rays
+
+  plt.plot(inc_angles, pass_frac, '.-')
+  plt.show()
