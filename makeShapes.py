@@ -57,6 +57,11 @@ def make_winston(din, dout, crit_angle, width, height, n_points=25):
   x_coords = x_vals * cos_c - (y_vals - focal_length) * sin_c - r_out
   y_coords = x_vals * sin_c + (y_vals - focal_length) * cos_c
 
+  ## Clip points outside of the main volume
+  sel_idx = (np.abs(x_coords) <= din/2) & (y_coords >= 0) & (y_coords <= height)
+  x_coords = x_coords[sel_idx]
+  y_coords = y_coords[sel_idx]
+
   result['shapes'].append({'x': x_coords, 'y': y_coords})
   result['shapes'].append({'x': -x_coords, 'y': y_coords})
 
@@ -219,7 +224,7 @@ if __name__ == '__main__':
 
   ## Trace a few sample rays
   #height = max(np.max(s['y']) for s in result['shapes'])
-  for x0 in np.linspace(-result['din'] / 2 * 0.9, result['din'] / 2 * 0.9, 7):
+  for x0 in np.linspace(-result['din'] / 2 * 0.9, result['din'] / 2 * 0.9, 9):
     xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, result['shapes'], pmt=result['pmt'])
     color = {'exit':'b', 'entrance':'r', 'bounce_limit':'r', 'pmt':'g'}
     plt.plot(xs, ys, color[exit_type]+'-', linewidth=0.5)
