@@ -96,15 +96,14 @@ def propagate(x, y, angle, mirrors, n_bounces=20):
   x, y : float
       Starting coordinates of the ray.
   angle : float
-      Direction of the ray in degrees, measured counterclockwise from the
-      positive x-axis.
+      Direction of the ray in degrees, measured counterclockwise from the incidence
   mirrors : sequence
       Collection of mirror shapes to intersect with.
   n_bounces : int, optional
       Maximum number of reflections to calculate.
   """
   pos = np.array([x, y], dtype=float)
-  rad = np.deg2rad(angle)
+  rad = np.deg2rad(angle-90)
   vel = np.array([np.cos(rad), np.sin(rad)], dtype=float)
 
   xs = [pos[0]]
@@ -168,10 +167,11 @@ if __name__ == '__main__':
   plt.plot([0, 0], [0, 1.5 * rmax], '-.k', linewidth=0.5)
 
   ## Trace a few sample rays
+  inc_angle = 10
   height = max(np.max(s['y']) for s in result['shapes'])
-  for x0 in np.linspace(-result['din'] / 2 * 0.9, result['din'] / 2 * 0.9, 5):
-    xs, ys = propagate(x0, height - 1, -90, result['shapes'])
-    plt.plot(xs, ys, 'r-')
+  for x0 in np.linspace(-result['din'] / 2 * 0.9, result['din'] / 2 * 0.9, 7):
+    xs, ys = propagate(x0, height - 1, inc_angle, result['shapes'])
+    plt.plot(xs, ys, 'r-', linewidth=0.5)
 
   plt.xlim(-rmax, rmax)
   plt.ylim(-0.2 * rmax, 1.2 * rmax)
