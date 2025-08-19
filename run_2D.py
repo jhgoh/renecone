@@ -238,14 +238,19 @@ if __name__ == '__main__':
 
   ## Start scanning over the incident angle
   inc_angles = np.linspace(0, 90, 100)
-  pass_frac = np.zeros(len(inc_angles))
+  frac_pass = np.zeros(len(inc_angles))
+  frac_entr = np.zeros(len(inc_angles))
   for i, inc_angle in enumerate(tqdm(inc_angles)):
-    n_pass = 0
+    n_pass, n_entr = 0, 0
     for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
       _, _, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], pmt=config['pmt'])
       if exit_type == 'pmt':
         n_pass += 1
-    pass_frac[i] = n_pass/par_n_rays
+      elif exit_type == 'entrance':
+        n_entr += 1
+    frac_pass[i] = n_pass/par_n_rays
+    frac_entr[i] = n_entr/par_n_rays
 
-  plt.plot(inc_angles, pass_frac, '.-')
+  plt.plot(inc_angles, frac_pass, 'b.-')
+  plt.plot(inc_angles, frac_entr, 'r.-')
   plt.show()
