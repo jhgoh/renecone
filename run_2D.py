@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import numpy as np
 import matplotlib.pyplot as plt
+import mplhep as hep
 from tqdm import tqdm
 
 def make_planar(din, dout, angle, width, height):
@@ -123,7 +124,7 @@ def propagate(x, y, angle, mirrors, pmt=None, n_bounces=20):
   -------
   xs, ys : ndarray
       Coordinates of the ray path.
-  exit_type : {'exit', 'entrance', 'bounce_limit', 'pmt'}
+  exit_type : {'exit', 'bounced back', 'bounce limit', 'on PMT'}
       Reason the propagation terminated.
   """
   pos = np.array([x, y], dtype=float)
@@ -158,11 +159,11 @@ def propagate(x, y, angle, mirrors, pmt=None, n_bounces=20):
         xs.append(pos[0] + t * vel[0])
         ys.append(0.0)
         exit_type = 'exit'
-      else:  # ray escapes back out the entrance
+      else:  # ray escapes back out the bounced back
         t = (height - pos[1]) / vel[1]
         xs.append(pos[0] + t * vel[0])
         ys.append(height)
-        exit_type = 'entrance'
+        exit_type = 'bounced back'
       break
 
     pos = best[1]
@@ -170,13 +171,13 @@ def propagate(x, y, angle, mirrors, pmt=None, n_bounces=20):
     ys.append(pos[1])
 
     if best_label == 'pmt':
-      exit_type = 'pmt'
+      exit_type = 'on PMT'
       break
     if pos[1] <= 0:
       exit_type = 'exit'
       break
     if pos[1] >= height:
-      exit_type = 'entrance'
+      exit_type = 'bounced back'
       break
 
     seg_vec = best_seg[1] - best_seg[0]
@@ -186,26 +187,29 @@ def propagate(x, y, angle, mirrors, pmt=None, n_bounces=20):
 
     bounces += 1
     if bounces >= n_bounces:
-      exit_type = 'bounce_limit'
+      exit_type = 'bounce limit'
       break
 
   return np.array(xs), np.array(ys), exit_type
 
 
 if __name__ == '__main__':
+  #plt.style.use('ROOT')
+  hep.style.use(hep.style.CMS)
+
   par_height = 1200
   par_width = 1200
   par_din = 1200
   par_dout = 460
-  #par_angle = 45
-  par_angle = 80
+  #par_angle = 80
+  par_angle = 20
   par_pmt_curv = 325 ## PMT curvature (325mm for R12860)
 
   par_n_rays = 101
   inc_angle = 10
 
-  config = make_planar(par_din, par_dout, par_angle, par_width, par_height)
-  #config = make_winston(par_din, par_dout, par_angle, par_width, par_height)
+  #config = make_planar(par_din, par_dout, par_angle, par_width, par_height)
+  config = make_winston(par_din, par_dout, par_angle, par_width, par_height)
   config['pmt'] = make_pmt(par_dout, pmt_curv=par_pmt_curv)
   # print(config)
 
@@ -228,7 +232,9 @@ if __name__ == '__main__':
   ## Trace a few sample rays
   for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
     xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], pmt=config['pmt'])
-    color = {'exit':'b', 'entrance':'r', 'bounce_limit':'r', 'pmt':'g'}
+    color = {'exit':'b', 'bounced back':'r', 'bounce limit':'r', 'on PMT':'g'}
+    plt.xlabel('x (mm)')
+    plt.ylabel('y (mm)')
     plt.plot(xs, ys, color[exit_type]+'-', linewidth=0.5)
 
   plt.xlim(-rmax, rmax)
@@ -237,20 +243,23 @@ if __name__ == '__main__':
   plt.show()
 
   ## Start scanning over the incident angle
-  inc_angles = np.linspace(0, 90, 100)
+  inc_angles = np.linspace(0, 90, 200)
   frac_pass = np.zeros(len(inc_angles))
   frac_entr = np.zeros(len(inc_angles))
   for i, inc_angle in enumerate(tqdm(inc_angles)):
     n_pass, n_entr = 0, 0
     for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
       _, _, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], pmt=config['pmt'])
-      if exit_type == 'pmt':
+      if exit_type == 'on PMT':
         n_pass += 1
-      elif exit_type == 'entrance':
+      elif exit_type == 'bounced back':
         n_entr += 1
     frac_pass[i] = n_pass/par_n_rays
     frac_entr[i] = n_entr/par_n_rays
 
-  plt.plot(inc_angles, frac_pass, 'b.-')
-  plt.plot(inc_angles, frac_entr, 'r.-')
+  plt.plot(inc_angles, frac_pass, 'b.-', label='on PMT')
+  plt.plot(inc_angles, frac_entr, 'r.-', label='bounced back')
+  plt.xlabel('Indicent angle (deg)')
+  plt.ylabel('Fraction')
+  plt.legend()
   plt.show()
