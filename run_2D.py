@@ -34,8 +34,8 @@ def _ray_segment_intersection(pos, vel, p1, p2):
   return None
 
 
-def propagate(x, y, angle, mirrors, pmt=None, n_bounces=20):
-  """Propagate a ray through a set of mirror segments and a PMT surface.
+def propagate(x, y, angle, mirrors, sensors=None, n_bounces=20):
+  """Propagate a ray through a set of mirror segments and a sensor surface.
 
   Parameters
   ----------
@@ -45,8 +45,8 @@ def propagate(x, y, angle, mirrors, pmt=None, n_bounces=20):
       Direction of the ray in degrees, measured counterclockwise from the incidence
   mirrors : sequence
       Collection of mirror mirrors to intersect with.
-  pmt : dict, optional
-      Shape describing the PMT surface to treat as an exit.
+  sensors : dict, optional
+      Shape describing the sensor surface to treat as an exit.
   n_bounces : int, optional
       Stop after this many reflections if the ray has not exited.
 
@@ -54,7 +54,7 @@ def propagate(x, y, angle, mirrors, pmt=None, n_bounces=20):
   -------
   xs, ys : ndarray
       Coordinates of the ray path.
-  exit_type : {'exit', 'bounced back', 'bounce limit', 'on PMT'}
+  exit_type : {'exit', 'bounced back', 'bounce limit', 'on sensor'}
       Reason the propagation terminated.
   """
   pos = np.array([x, y], dtype=float)
@@ -64,8 +64,8 @@ def propagate(x, y, angle, mirrors, pmt=None, n_bounces=20):
   xs = [pos[0]]
   ys = [pos[1]]
   segments = _build_segments(mirrors, 'mirror')
-  if pmt is not None:
-    segments.extend(_build_segments([pmt], 'pmt'))
+  if sensors is not None:
+    segments.extend(_build_segments([sensors], 'sensors'))
   height = max(np.max(s['y']) for s in mirrors)
   bounces = 0
 
@@ -100,8 +100,8 @@ def propagate(x, y, angle, mirrors, pmt=None, n_bounces=20):
     xs.append(pos[0])
     ys.append(pos[1])
 
-    if best_label == 'pmt':
-      exit_type = 'on PMT'
+    if best_label == 'sensors':
+      exit_type = 'on sensor'
       break
     if pos[1] <= 0:
       exit_type = 'exit'
@@ -133,14 +133,14 @@ if __name__ == '__main__':
   par_dout = 460
   #par_angle = 80
   par_angle = 20
-  par_pmt_curv = 325 ## PMT curvature (325mm for R12860)
+  par_sensors_curv = 325 ## sensor curvature (325mm for R12860)
 
   par_n_rays = 101
   inc_angle = 10
 
   #config = make_planar(par_din, par_dout, par_angle, par_width, par_height)
   config = make_winston(par_din, par_dout, par_angle, par_width, par_height)
-  config['pmt'] = make_pmt(par_dout, pmt_curv=par_pmt_curv)
+  config['sensors'] = make_sensors(par_dout, sensors_curv=par_sensors_curv)
   # print(config)
 
   rmax = 0
@@ -151,8 +151,8 @@ if __name__ == '__main__':
 
     rmax = max(np.hypot(x, y).max(), rmax)
 
-  ## Draw PMT surface
-  x, y = config['pmt']['x'], config['pmt']['y']
+  ## Draw sensor surface
+  x, y = config['sensors']['x'], config['sensors']['y']
   plt.plot(x, y, 'g', linewidth=2)
 
   ## Draw axis
@@ -161,8 +161,8 @@ if __name__ == '__main__':
 
   ## Trace a few sample rays
   for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
-    xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], pmt=config['pmt'])
-    color = {'exit':'b', 'bounced back':'r', 'bounce limit':'r', 'on PMT':'g'}
+    xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensors=config['sensors'])
+    color = {'exit':'b', 'bounced back':'r', 'bounce limit':'r', 'on sensor':'g'}
     plt.xlabel('x (mm)')
     plt.ylabel('y (mm)')
     plt.plot(xs, ys, color[exit_type]+'-', linewidth=0.5)
@@ -179,15 +179,15 @@ if __name__ == '__main__':
   for i, inc_angle in enumerate(tqdm(inc_angles)):
     n_pass, n_entr = 0, 0
     for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
-      _, _, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], pmt=config['pmt'])
-      if exit_type == 'on PMT':
+      _, _, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensors=config['sensors'])
+      if exit_type == 'on sensor':
         n_pass += 1
       elif exit_type == 'bounced back':
         n_entr += 1
     frac_pass[i] = n_pass/par_n_rays
     frac_entr[i] = n_entr/par_n_rays
 
-  plt.plot(inc_angles, frac_pass, 'b.-', label='on PMT')
+  plt.plot(inc_angles, frac_pass, 'b.-', label='on sensor')
   plt.plot(inc_angles, frac_entr, 'r.-', label='bounced back')
   plt.xlabel('Indicent angle (deg)')
   plt.ylabel('Fraction')

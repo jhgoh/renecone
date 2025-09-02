@@ -32,5 +32,5 @@ MPLBACKEND=Agg python run_2D.py
 
 The script will open a window (or generate an off‑screen figure) displaying the
 constructed geometry and ray paths. Parameters such as input/output diameters,
-mirror angles and PMT curvature can be adjusted in the `__main__` section of
+mirror angles and sensor curvature can be adjusted in the `__main__` section of
 `run_2D.py` to explore different configurations.

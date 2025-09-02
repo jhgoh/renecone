@@ -66,12 +66,12 @@ def make_winston(din, dout, crit_angle, width, height, n_points=512):
   return config
 
 
-def make_pmt(dout, pmt_curv=None, n_points=25):
-  """Generate a PMT surface at the exit plane."""
-  if pmt_curv is not None:
+def make_sensor(dout, sensor_curv=None, n_points=25):
+  """Generate a sensing surface at the exit plane."""
+  if sensor_curv is not None:
     x = np.linspace(-dout / 2, dout / 2, n_points)
-    sagitta = np.sqrt(pmt_curv**2 - (dout / 2)**2)
-    y = np.sqrt(pmt_curv**2 - x**2) - sagitta
+    sagitta = np.sqrt(sensor_curv**2 - (dout / 2)**2)
+    y = np.sqrt(sensor_curv**2 - x**2) - sagitta
     return {'x': x, 'y': y}
   return {'x': [-dout / 2, dout / 2], 'y': [0, 0]}
 

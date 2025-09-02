@@ -8,7 +8,7 @@ import sys
 sys.path.append('python')
 from ConeProfile import *
 
-def propagate(x0, y0, z0, theta, mirrors, pmt=None, n_bounces=20):
+def propagate(x0, y0, z0, theta, mirrors, sensors=None, n_bounces=20):
   tol = 1e-9 ## Numerical tolerance
 
   ## endpoints of light ray segments
@@ -21,7 +21,7 @@ def propagate(x0, y0, z0, theta, mirrors, pmt=None, n_bounces=20):
   
   bounces = 0
   while True:
-    ## We model the mirror and PMT surfaces by revolving piecewise linear segments in x-y plane along the y-axis,
+    ## We model the mirror and sensor surfaces by revolving piecewise linear segments in x-y plane along the y-axis,
     ## in other words, patch of straight cones sliced by some height, alighed along the y-axis.
     ## This semi-analytic approach will give a precise and fast result for the object with a cylindrical symmetry.
     ##
@@ -52,14 +52,14 @@ if __name__ == '__main__':
   par_dout = 460
   #par_angle = 80
   par_angle = 20
-  par_pmt_curv = 325 ## PMT curvature (325mm for R12860)
+  par_sensor_curv = 325 ## sensor curvature (325mm for R12860)
 
   par_n_rays = 101
   inc_angle = 10
 
   #config = make_planar(par_din, par_dout, par_angle, par_width, par_height)
   config = make_winston(par_din, par_dout, par_angle, par_width, par_height)
-  config['pmt'] = make_pmt(par_dout, pmt_curv=par_pmt_curv)
+  config['sensors'] = make_sensor(par_dout, sensor_curv=par_sensor_curv)
   # print(config)
 
   rmax = 0
@@ -70,8 +70,8 @@ if __name__ == '__main__':
 
     rmax = max(np.hypot(x, y).max(), rmax)
 
-  ## Draw PMT surface
-  x, y = config['pmt']['x'], config['pmt']['y']
+  ## Draw sensor surface
+  x, y = config['sensors']['x'], config['sensors']['y']
   plt.plot(x, y, 'g', linewidth=2)
 
   ## Draw axis
@@ -80,8 +80,8 @@ if __name__ == '__main__':
 
   ### Trace a few sample rays
   #for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
-  #  xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], pmt=config['pmt'])
-  #  color = {'exit':'b', 'bounced back':'r', 'bounce limit':'r', 'on PMT':'g'}
+  #  xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensors=config['sensors'])
+  #  color = {'exit':'b', 'bounced back':'r', 'bounce limit':'r', 'on sensor':'g'}
   #  plt.xlabel('x (mm)')
   #  plt.ylabel('y (mm)')
   #  plt.plot(xs, ys, color[exit_type]+'-', linewidth=0.5)
@@ -98,15 +98,15 @@ if __name__ == '__main__':
   #for i, inc_angle in enumerate(tqdm(inc_angles)):
   #  n_pass, n_entr = 0, 0
   #  for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
-  #    _, _, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], pmt=config['pmt'])
-  #    if exit_type == 'on PMT':
+  #    _, _, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensors=config['sensors'])
+  #    if exit_type == 'on sensor':
   #      n_pass += 1
   #    elif exit_type == 'bounced back':
   #      n_entr += 1
   #  frac_pass[i] = n_pass/par_n_rays
   #  frac_entr[i] = n_entr/par_n_rays
 
-  #plt.plot(inc_angles, frac_pass, 'b.-', label='on PMT')
+  #plt.plot(inc_angles, frac_pass, 'b.-', label='on sensor')
   #plt.plot(inc_angles, frac_entr, 'r.-', label='bounced back')
   #plt.xlabel('Indicent angle (deg)')
   #plt.ylabel('Fraction')
