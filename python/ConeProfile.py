@@ -66,7 +66,7 @@ def make_winston(din, dout, crit_angle, width, height, n_points=512):
   return config
 
 
-def make_sensor(dout, sensor_curv=None, n_points=25):
+def make_sensors(dout, sensor_curv=None, n_points=25):
   """Generate a sensing surface at the exit plane."""
   if sensor_curv is not None:
     x = np.linspace(-dout / 2, dout / 2, n_points)

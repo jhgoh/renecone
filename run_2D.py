@@ -133,14 +133,14 @@ if __name__ == '__main__':
   par_dout = 460
   #par_angle = 80
   par_angle = 20
-  par_sensors_curv = 325 ## sensor curvature (325mm for R12860)
+  par_sensor_curv = 325 ## sensor curvature (325mm for R12860)
 
   par_n_rays = 101
   inc_angle = 10
 
   #config = make_planar(par_din, par_dout, par_angle, par_width, par_height)
   config = make_winston(par_din, par_dout, par_angle, par_width, par_height)
-  config['sensors'] = make_sensors(par_dout, sensors_curv=par_sensors_curv)
+  config['sensors'] = make_sensors(par_dout, sensor_curv=par_sensor_curv)
   # print(config)
 
   rmax = 0
