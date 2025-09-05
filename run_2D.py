@@ -37,8 +37,7 @@ def findSegments(x0, y0, vx, vy, mx, my):
 def getDist(x0, y0, vx, vy, x, y):
   dx = x - x0
   dy = y - y0
-  #r = (vx*dx + vy*dy) / np.hypot(vx, vy)
-  r = np.hypot(dx, dy)
+  r = (vx*dx + vy*dy) / np.hypot(vx, vy)
 
   return r
 
@@ -86,7 +85,7 @@ def propagate(x0, y0, angle, mirrors, sensor=None, n_bounces=20):
     ymax = sy.max() if ymax == None else max(ymax, sy.max())
 
   while n_bounces >= 0:
-    bestR = None
+    bestR, bestX, bestY = None, None, None
     bestType = None
     bestTangent = None
     for mx, my in zip(mxs, mys):
@@ -94,8 +93,8 @@ def propagate(x0, y0, angle, mirrors, sensor=None, n_bounces=20):
       if len(x) > 0:
         r = getDist(x0, y0, vx, vy, x, y)
         irmin = r.argmin()
-        if bestR == None or r[irmin] <= bestR:
-          bestR, x0, y0 = r[irmin], x[irmin], y[irmin]
+        if bestR == None or r[irmin] < bestR:
+          bestR, bestX, bestY = r[irmin], x[irmin], y[irmin]
           bestType = 'mirror'
           bestTangent = [dx[irmin], dy[irmin]]
     if sensor:
@@ -103,8 +102,8 @@ def propagate(x0, y0, angle, mirrors, sensor=None, n_bounces=20):
       if len(x) > 0:
         r = getDist(x0, y0, vx, vy, x, y)
         irmin = r.argmin()
-        if bestR == None or r[irmin] <= bestR:
-          bestR, x0, y0 = r[irmin], x[irmin], y[irmin]
+        if bestR == None or r[irmin] < bestR:
+          bestR, bestX, bestY = r[irmin], x[irmin], y[irmin]
           bestType = 'on sensor'
           bestTangent = [dx[irmin], dy[irmin]]
           #bestTangent = None
@@ -117,6 +116,8 @@ def propagate(x0, y0, angle, mirrors, sensor=None, n_bounces=20):
         if bestR == None or r[irmin] < bestR:
           bestR, x0, y0 = r[irmin], x[irmin], y[irmin]
           bestType = 'bounced back'
+    else:
+      x0, y0 = bestX, bestY
     if bestType == None:
       x, y, dx, dy = findSegments(x0, y0, vx, vy, np.array([xmin, xmax]), np.array([0, 0]))
       if len(x) > 0:
@@ -151,7 +152,7 @@ if __name__ == '__main__':
   par_sensor_curv = 325 ## sensor curvature (325mm for R12860)
 
   par_n_rays = 101
-  inc_angle = -10
+  inc_angle = -30
 
   #config = make_planar(par_din, par_dout, par_angle, par_width, par_height)
   config = make_winston(par_din, par_dout, par_angle, par_width, par_height)
