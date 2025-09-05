@@ -8,120 +8,135 @@ import sys
 sys.path.append('python')
 from ConeProfile import *
 
-def _build_segments(mirrors, label=None):
-  """Convert polylines into a list of labeled line segments."""
-  segments = []
-  for shape in mirrors:
-    x = np.asarray(shape['x'])
-    y = np.asarray(shape['y'])
-    for p1, p2 in zip(np.column_stack((x[:-1], y[:-1])),
-                      np.column_stack((x[1:], y[1:]))):
-      segments.append((p1, p2, label))
-  return segments
+def findSegments(x0, y0, vx, vy, mx, my):
+  tol = 1e-3
+  dmx = mx[1:]-mx[:-1]
+  dmy = my[1:]-my[:-1]
 
+  ss = vx*dmy - vy*dmx
+  ok = np.abs(ss) > tol
 
-def _ray_segment_intersection(pos, vel, p1, p2):
-  """Return distance along ray and intersection point with a segment."""
-  r = vel
-  s = p2 - p1
-  denom = r[0] * s[1] - r[1] * s[0]
-  if np.isclose(denom, 0):
-    return None
-  t = ((p1[0] - pos[0]) * s[1] - (p1[1] - pos[1]) * s[0]) / denom
-  u = ((p1[0] - pos[0]) * r[1] - (p1[1] - pos[1]) * r[0]) / denom
-  if t > 1e-9 and 0 <= u <= 1:
-    return t, p1 + u * s
-  return None
+  qx = mx[:-1] - x0
+  qy = my[:-1] - y0
 
+  t = np.full_like(ss, np.inf, dtype=float)
+  u = np.full_like(ss, np.inf, dtype=float)
 
-def propagate(x, y, angle, mirrors, sensors=None, n_bounces=20):
-  """Propagate a ray through a set of mirror segments and a sensor surface.
+  t[ok] = (qx[ok]*dmy[ok] - qy[ok]*dmx[ok]) / ss[ok]
+  u[ok] = (qx[ok]*vy      - qy[ok]*vx     ) / ss[ok]
 
-  Parameters
-  ----------
-  x, y : float
-      Starting coordinates of the ray.
-  angle : float
-      Direction of the ray in degrees, measured counterclockwise from the incidence
-  mirrors : sequence
-      Collection of mirror mirrors to intersect with.
-  sensors : dict, optional
-      Shape describing the sensor surface to treat as an exit.
-  n_bounces : int, optional
-      Stop after this many reflections if the ray has not exited.
+  hit = ok & (t >= tol) & (u >= -tol) & (u <= 1+tol)
+  if not np.any(hit):
+    return np.array([]), np.array([]), np.array([]), np.array([])
 
-  Returns
-  -------
-  xs, ys : ndarray
-      Coordinates of the ray path.
-  exit_type : {'exit', 'bounced back', 'bounce limit', 'on sensor'}
-      Reason the propagation terminated.
-  """
-  pos = np.array([x, y], dtype=float)
+  x = x0 + t*vx
+  y = y0 + t*vy
+
+  return x[hit], y[hit], dmx[hit], dmy[hit]
+
+def getDist(x0, y0, vx, vy, x, y):
+  dx = x - x0
+  dy = y - y0
+  #r = (vx*dx + vy*dy) / np.hypot(vx, vy)
+  r = np.hypot(dx, dy)
+
+  return r
+
+def reflect(vx, vy, dx, dy):
+  dr = np.hypot(dx, dy)
+  dx, dy = dx/dr, dy/dr
+  nx, ny = -dy, dx
+
+  norm = vx*nx + vy*ny
+  if norm > 0:
+    nx, ny = -nx, -ny
+    norm = -norm
+
+  ux = vx - 2*norm*nx
+  uy = vy - 2*norm*ny
+
+  return ux, uy
+
+def propagate(x0, y0, angle, mirrors, sensor=None, n_bounces=20):
+  tol = 1e-7
   rad = np.deg2rad(angle-90)
-  vel = np.array([np.cos(rad), np.sin(rad)], dtype=float)
+  vx, vy = np.cos(rad), np.sin(rad)
+  xs, ys = [x0], [y0]
+  exit_type = 'bounce limit'
 
-  xs = [pos[0]]
-  ys = [pos[1]]
-  segments = _build_segments(mirrors, 'mirror')
-  if sensors is not None:
-    segments.extend(_build_segments([sensors], 'sensors'))
-  height = max(np.max(s['y']) for s in mirrors)
-  bounces = 0
+  xmin, xmax, ymax = None, None, None
 
-  while True:
-    best = None
-    best_seg = None
-    best_label = None
-    for p1, p2, label in segments:
-      res = _ray_segment_intersection(pos, vel, p1, p2)
-      if res is None:
-        continue
-      t, ipt = res
-      if best is None or t < best[0]:
-        best = (t, ipt)
-        best_seg = (p1, p2)
-        best_label = label
+  mxs, mys = [], []
+  for mirror in mirrors:
+    mx = np.array(mirror['x'])
+    my = np.array(mirror['y'])
+    mxs.append(mx)
+    mys.append(my)
 
-    if best is None:
-      if vel[1] < 0:  # extend ray to exit plane y=0
-        t = -pos[1] / vel[1]
-        xs.append(pos[0] + t * vel[0])
-        ys.append(0.0)
-        exit_type = 'exit'
-      else:  # ray escapes back out the bounced back
-        t = (height - pos[1]) / vel[1]
-        xs.append(pos[0] + t * vel[0])
-        ys.append(height)
-        exit_type = 'bounced back'
-      break
+    xmin = mx.min() if xmin == None else min(xmin, mx.min())
+    xmax = mx.max() if xmax == None else max(xmax, mx.max())
+    ymax = my.max() if ymax == None else max(ymax, my.max())
 
-    pos = best[1]
-    xs.append(pos[0])
-    ys.append(pos[1])
+  if sensor:
+    sx = np.array(sensor['x'])
+    sy = np.array(sensor['y'])
 
-    if best_label == 'sensors':
-      exit_type = 'on sensor'
-      break
-    if pos[1] <= 0:
-      exit_type = 'exit'
-      break
-    if pos[1] >= height:
-      exit_type = 'bounced back'
-      break
+    xmin = sx.min() if xmin == None else min(xmin, sx.min())
+    xmax = sx.max() if xmax == None else max(xmax, sx.max())
+    ymax = sy.max() if ymax == None else max(ymax, sy.max())
 
-    seg_vec = best_seg[1] - best_seg[0]
-    normal = np.array([-seg_vec[1], seg_vec[0]])
-    normal /= np.linalg.norm(normal)
-    vel = vel - 2 * np.dot(vel, normal) * normal
+  while n_bounces >= 0:
+    bestR = None
+    bestType = None
+    bestTangent = None
+    for mx, my in zip(mxs, mys):
+      x, y, dx, dy = findSegments(x0, y0, vx, vy, mx, my)
+      if len(x) > 0:
+        r = getDist(x0, y0, vx, vy, x, y)
+        irmin = r.argmin()
+        if bestR == None or r[irmin] <= bestR:
+          bestR, x0, y0 = r[irmin], x[irmin], y[irmin]
+          bestType = 'mirror'
+          bestTangent = [dx[irmin], dy[irmin]]
+    if sensor:
+      x, y, dx, dy = findSegments(x0, y0, vx, vy, sx, sy)
+      if len(x) > 0:
+        r = getDist(x0, y0, vx, vy, x, y)
+        irmin = r.argmin()
+        if bestR == None or r[irmin] <= bestR:
+          bestR, x0, y0 = r[irmin], x[irmin], y[irmin]
+          bestType = 'on sensor'
+          bestTangent = [dx[irmin], dy[irmin]]
+          #bestTangent = None
+    ## Add a virtual layer to pick up rays escaping backwards
+    if bestType == None:
+      x, y, dx, dy = findSegments(x0, y0, vx, vy, np.array([xmin, xmax]), np.array([ymax, ymax]))
+      if len(x) > 0:
+        r = getDist(x0, y0, vx, vy, x, y)
+        irmin = r.argmin()
+        if bestR == None or r[irmin] < bestR:
+          bestR, x0, y0 = r[irmin], x[irmin], y[irmin]
+          bestType = 'bounced back'
+    if bestType == None:
+      x, y, dx, dy = findSegments(x0, y0, vx, vy, np.array([xmin, xmax]), np.array([0, 0]))
+      if len(x) > 0:
+        r = getDist(x0, y0, vx, vy, x, y)
+        irmin = r.argmin()
+        if bestR == None or r[irmin] < bestR:
+          bestR, x0, y0 = r[irmin], x[irmin], y[irmin]
+          bestType = 'exit'
 
-    bounces += 1
-    if bounces >= n_bounces:
-      exit_type = 'bounce limit'
+    xs.append(x0)
+    ys.append(y0)
+
+    if bestType == 'mirror':
+      n_bounces -= 1
+      vx, vy = reflect(vx, vy, *bestTangent)
+    else:
+      exit_type = bestType if bestType else 'bounced back'
       break
 
   return np.array(xs), np.array(ys), exit_type
-
 
 if __name__ == '__main__':
   #plt.style.use('ROOT')
@@ -136,11 +151,11 @@ if __name__ == '__main__':
   par_sensor_curv = 325 ## sensor curvature (325mm for R12860)
 
   par_n_rays = 101
-  inc_angle = 10
+  inc_angle = -10
 
   #config = make_planar(par_din, par_dout, par_angle, par_width, par_height)
   config = make_winston(par_din, par_dout, par_angle, par_width, par_height)
-  config['sensors'] = make_sensors(par_dout, sensor_curv=par_sensor_curv)
+  config['sensor'] = make_sensor(par_dout, sensor_curv=par_sensor_curv)
   # print(config)
 
   rmax = 0
@@ -152,7 +167,7 @@ if __name__ == '__main__':
     rmax = max(np.hypot(x, y).max(), rmax)
 
   ## Draw sensor surface
-  x, y = config['sensors']['x'], config['sensors']['y']
+  x, y = config['sensor']['x'], config['sensor']['y']
   plt.plot(x, y, 'g', linewidth=2)
 
   ## Draw axis
@@ -161,7 +176,7 @@ if __name__ == '__main__':
 
   ## Trace a few sample rays
   for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
-    xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensors=config['sensors'])
+    xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensor=config['sensor'])
     color = {'exit':'b', 'bounced back':'r', 'bounce limit':'r', 'on sensor':'g'}
     plt.xlabel('x (mm)')
     plt.ylabel('y (mm)')
@@ -179,7 +194,7 @@ if __name__ == '__main__':
   for i, inc_angle in enumerate(tqdm(inc_angles)):
     n_pass, n_entr = 0, 0
     for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
-      _, _, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensors=config['sensors'])
+      _, _, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensor=config['sensor'])
       if exit_type == 'on sensor':
         n_pass += 1
       elif exit_type == 'bounced back':

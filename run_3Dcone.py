@@ -8,7 +8,7 @@ import sys
 sys.path.append('python')
 from ConeProfile import *
 
-def propagate(x0, y0, z0, theta, mirrors, sensors=None, n_bounces=20):
+def propagate(x0, y0, z0, theta, mirrors, sensor=None, n_bounces=20):
   tol = 1e-9 ## Numerical tolerance
 
   ## endpoints of light ray segments
@@ -59,7 +59,7 @@ if __name__ == '__main__':
 
   #config = make_planar(par_din, par_dout, par_angle, par_width, par_height)
   config = make_winston(par_din, par_dout, par_angle, par_width, par_height)
-  config['sensors'] = make_sensor(par_dout, sensor_curv=par_sensor_curv)
+  config['sensor'] = make_sensor(par_dout, sensor_curv=par_sensor_curv)
   # print(config)
 
   rmax = 0
@@ -71,7 +71,7 @@ if __name__ == '__main__':
     rmax = max(np.hypot(x, y).max(), rmax)
 
   ## Draw sensor surface
-  x, y = config['sensors']['x'], config['sensors']['y']
+  x, y = config['sensor']['x'], config['sensor']['y']
   plt.plot(x, y, 'g', linewidth=2)
 
   ## Draw axis
@@ -80,7 +80,7 @@ if __name__ == '__main__':
 
   ### Trace a few sample rays
   #for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
-  #  xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensors=config['sensors'])
+  #  xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensor=config['sensor'])
   #  color = {'exit':'b', 'bounced back':'r', 'bounce limit':'r', 'on sensor':'g'}
   #  plt.xlabel('x (mm)')
   #  plt.ylabel('y (mm)')
@@ -98,7 +98,7 @@ if __name__ == '__main__':
   #for i, inc_angle in enumerate(tqdm(inc_angles)):
   #  n_pass, n_entr = 0, 0
   #  for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
-  #    _, _, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensors=config['sensors'])
+  #    _, _, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensor=config['sensor'])
   #    if exit_type == 'on sensor':
   #      n_pass += 1
   #    elif exit_type == 'bounced back':
