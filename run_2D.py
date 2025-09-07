@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import mplhep as hep
 from tqdm import tqdm
+from numba import njit
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import sys
@@ -11,6 +12,7 @@ from ConeProfile import *
 
 tol: float = 1e-7
 
+@njit(cache=True)
 def findSegments(
     x0: float,
     y0: float,
@@ -19,30 +21,32 @@ def findSegments(
     mx: np.ndarray,
     my: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-  dmx = mx[1:]-mx[:-1]
-  dmy = my[1:]-my[:-1]
+  dmx = mx[1:] - mx[:-1]
+  dmy = my[1:] - my[:-1]
 
-  ss = vx*dmy - vy*dmx
+  ss = vx * dmy - vy * dmx
   ok = np.abs(ss) > tol
 
   qx = mx[:-1] - x0
   qy = my[:-1] - y0
 
-  t = np.full_like(ss, np.inf, dtype=float)
-  u = np.full_like(ss, np.inf, dtype=float)
+  t = np.full(ss.shape, np.inf)
+  u = np.full(ss.shape, np.inf)
 
-  t[ok] = (qx[ok]*dmy[ok] - qy[ok]*dmx[ok]) / ss[ok]
-  u[ok] = (qx[ok]*vy      - qy[ok]*vx     ) / ss[ok]
+  t[ok] = (qx[ok] * dmy[ok] - qy[ok] * dmx[ok]) / ss[ok]
+  u[ok] = (qx[ok] * vy - qy[ok] * vx) / ss[ok]
 
-  hit = ok & (t >= tol) & (u >= -tol) & (u <= 1+tol)
+  hit = ok & (t >= tol) & (u >= -tol) & (u <= 1 + tol)
   if not np.any(hit):
-    return np.array([]), np.array([]), np.array([]), np.array([])
+    return (np.empty(0, dtype=np.float64), np.empty(0, dtype=np.float64),
+            np.empty(0, dtype=np.float64), np.empty(0, dtype=np.float64))
 
-  x = x0 + t*vx
-  y = y0 + t*vy
+  x = x0 + t * vx
+  y = y0 + t * vy
 
   return x[hit], y[hit], dmx[hit], dmy[hit]
 
+@njit(cache=True)
 def getDist(
     x0: float,
     y0: float,
@@ -53,22 +57,23 @@ def getDist(
 ) -> np.ndarray:
   dx = x - x0
   dy = y - y0
-  r = (vx*dx + vy*dy) / np.hypot(vx, vy)
+  r = (vx * dx + vy * dy) / np.hypot(vx, vy)
 
   return r
 
+@njit(cache=True)
 def reflect(vx: float, vy: float, dx: float, dy: float) -> Tuple[float, float]:
   dr = np.hypot(dx, dy)
-  dx, dy = dx/dr, dy/dr
+  dx, dy = dx / dr, dy / dr
   nx, ny = -dy, dx
 
-  norm = vx*nx + vy*ny
+  norm = vx * nx + vy * ny
   if norm > 0:
     nx, ny = -nx, -ny
     norm = -norm
 
-  ux = vx - 2*norm*nx
-  uy = vy - 2*norm*ny
+  ux = vx - 2 * norm * nx
+  uy = vy - 2 * norm * ny
 
   return ux, uy
 
@@ -89,8 +94,8 @@ def propagate(
 
   mxs, mys = [], []
   for mirror in mirrors:
-    mx = np.array(mirror['x'])
-    my = np.array(mirror['y'])
+    mx = np.array(mirror['x'], dtype=np.float64)
+    my = np.array(mirror['y'], dtype=np.float64)
     mxs.append(mx)
     mys.append(my)
 
@@ -99,8 +104,8 @@ def propagate(
     ymax = my.max() if ymax == None else max(ymax, my.max())
 
   if sensor:
-    sx = np.array(sensor['x'])
-    sy = np.array(sensor['y'])
+    sx = np.array(sensor['x'], dtype=np.float64)
+    sy = np.array(sensor['y'], dtype=np.float64)
 
     xmin = sx.min() if xmin == None else min(xmin, sx.min())
     xmax = sx.max() if xmax == None else max(xmax, sx.max())
@@ -129,7 +134,9 @@ def propagate(
           bestType = 'on sensor'
     ## Add a virtual layer to pick up rays escaping backwards
     if bestType == None:
-      x, y, dx, dy = findSegments(x0, y0, vx, vy, np.array([xmin, xmax]), np.array([ymax, ymax]))
+      x, y, dx, dy = findSegments(x0, y0, vx, vy,
+                                  np.array([xmin, xmax], dtype=np.float64),
+                                  np.array([ymax, ymax], dtype=np.float64))
       if len(x) > 0:
         r = getDist(x0, y0, vx, vy, x, y)
         irmin = r.argmin()
@@ -139,7 +146,9 @@ def propagate(
     else:
       x0, y0 = bestX, bestY
     if bestType == None:
-      x, y, dx, dy = findSegments(x0, y0, vx, vy, np.array([xmin, xmax]), np.array([0, 0]))
+      x, y, dx, dy = findSegments(x0, y0, vx, vy,
+                                  np.array([xmin, xmax], dtype=np.float64),
+                                  np.array([0, 0], dtype=np.float64))
       if len(x) > 0:
         r = getDist(x0, y0, vx, vy, x, y)
         irmin = r.argmin()
