@@ -43,8 +43,9 @@ def findSegments(
 
   x = x0 + t * vx
   y = y0 + t * vy
+  nx, ny = -dmy, dmx
 
-  return x[hit], y[hit], dmx[hit], dmy[hit]
+  return x[hit], y[hit], nx[hit], ny[hit]
 
 @njit(cache=True)
 def getDist(
@@ -62,10 +63,9 @@ def getDist(
   return r
 
 @njit(cache=True)
-def reflect(vx: float, vy: float, dx: float, dy: float) -> Tuple[float, float]:
-  dr = np.hypot(dx, dy)
-  dx, dy = dx / dr, dy / dr
-  nx, ny = -dy, dx
+def reflect(vx: float, vy: float, nx: float, ny: float) -> Tuple[float, float]:
+  nr = np.hypot(nx, ny)
+  nx, ny = nx/nr, ny/nr
 
   norm = vx * nx + vy * ny
   if norm > 0:
