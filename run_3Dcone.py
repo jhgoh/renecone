@@ -8,39 +8,94 @@ import sys
 sys.path.append('python')
 from ConeProfile import *
 
+tol = 1e-7 ## Numerical tolerance
+
+def findSegments(x0, y0, z0, vx, vy, vz, mx, my):
+  dmx = mx[1:]-mx[:-1]
+  dmy = my[1:]-my[:-1]
+
 def propagate(x0, y0, z0, theta, mirrors, sensor=None, n_bounces=20):
-  tol = 1e-9 ## Numerical tolerance
-
-  ## endpoints of light ray segments
-  xs = [x0]
-  ys = [y0]
-  zs = [z0]
-
   theta = np.deg2rad(theta-90) ## initial light ray of theta=0 points downwards
   vx, vy, vz = np.cos(theta), np.sin(theta), 0 ## set the initial direction of light ray. we don't consider z-component (through the screen)
-  
-  bounces = 0
-  while True:
-    ## We model the mirror and sensor surfaces by revolving piecewise linear segments in x-y plane along the y-axis,
-    ## in other words, patch of straight cones sliced by some height, alighed along the y-axis.
-    ## This semi-analytic approach will give a precise and fast result for the object with a cylindrical symmetry.
-    ##
-    ## The coordinate system could be somehow inconvenient (to me) - cone is pointing to the y-axis, not the z-axis nor the x-axis.
-    ## but let us bear with it to keep the consistency of 2D cone
+  xs, ys, zs = [x0], [y0], [z0]
+  exit_type = 'bounce limit'
 
-    ## For the first step, rotate along the y-axis where the line of the ray looks like a vertical line,
-    ## so that we can break down the problem to series of 2D geometry problems
-    msegs = []
-    ## Exception: vy=0 -> we already know the y position of the next bounce
-    if np.abs(vx) <= tol:
-      ## Note: there are lots of efficient search algorithms, but we loop over all vertices for generallity
-      for mxs, mys in mirrors:
-        
-        
-      
-    phi = np.atan2(vz, vx)
-    for mxs, mys in mirrors:
-      
+  rmin, rmax, ymax = None, None, None
+
+  mxs, mys = [], []
+  for mirror in mirrors:
+    mx = np.array(mirror['x'])
+    my = np.array(mirror['y'])
+    mxs.append(mx)
+    mys.append(my)
+
+    rmax = mx.max() if rmax == None else max(rmax, np.abs(mx.min()), mx.max())
+    ymax = my.max() if ymax == None else max(ymax, my.max())
+
+  if sensor:
+    sx = np.array(sensor['x'])
+    sy = np.array(sensor['y'])
+
+    rmax = sx.max() if rmax == None else max(rmax, np.abs(sx.min()), sx.max())
+    ymax = sy.max() if ymax == None else max(ymax, sy.max())
+
+  while n_bounces >= 0:
+    bestR, bestX, bestY, bestZ = None, None, None, None
+    bestType = None
+    bestTangent = None
+    for mx, my in zip(mxs, mys):
+      x, y, z, dx, dy, dz = findSegments(x0, y0, z0, vx, vy, vz, mx, my)
+      if len(x) > 0:
+        r = getDist(x0, y0, z0, vx, vy, vz, x, y, z)
+        irmin = r.argmin()
+        if bestR == None or r[irmin] < bestR:
+          bestR, bestX, bestY, bestZ = r[irmin], x[irmin], y[irmin], z[irmin]
+          bestType = 'mirror'
+          bestTangent = [dx[irmin], dy[irmin], dz[irmin]]
+    if sensor:
+      x, y, z, dx, dy, dz = findSegments(x0, y0, z0, vx, vy, vz, sx, sy)
+      if len(x) > 0:
+        r = getDist(x0, y0, z0, vx, vy, vz, x, y, z)
+        irmin = r.argmin()
+        if bestR == None or r[irmin] < bestR:
+          bestR, bestX, bestY, bestZ = r[irmin], x[irmin], y[irmin], z[irmin]
+          bestType = 'on sensor'
+    ## Add a virtual layer to pick up rays escaping backwards
+    if bestType == None:
+      x, y, z, dx, dy, dz = findSegments(x0, y0, z0, vx, vy, vz,
+                                         np.array([-rmax, rmax]), np.array([ymax, ymax]))
+      if len(x) > 0:
+        r = getDist(x0, y0, z0, vx, vy, vz, x, y, z)
+        irmin = r.argmin()
+        if bestR == None or r[irmin] < bestR:
+          bestR, x0, y0, z0 = r[irmin], x[irmin], y[irmin], z[irmin]
+          bestType = 'bounced back'
+    else:
+      x0, y0, z0 = bestX, bestY, bestZ
+    if bestType == None:
+      x, y, z, dx, dy, dz = findSegments(x0, y0, z0, vx, vy, vz,
+                                         np.array([-rmax, rmax]), np.array([0, 0]))
+      if len(x) > 0:
+        r = getDist(x0, y0, z0, vx, vy, vz, x, y, z)
+        irmin = r.argmin()
+        if bestR == None or r[irmin] < bestR:
+          bestR, x0, y0, z0 = r[irmin], x[irmin], y[irmin], z[irmin]
+          bestType = 'exit'
+
+    xs.append(x0)
+    ys.append(y0)
+    zs.append(z0)
+
+    if bestType == 'mirror':
+      n_bounces -= 1
+      vx, vy, vz = reflect(vx, vy, vz, *bestTangent)
+    else:
+      exit_type = bestType if bestType else 'bounced back'
+      break
+
+  return np.array(xs), np.array(ys), np.array(zs), exit_type
+
+ 
 
 if __name__ == '__main__':
   #plt.style.use('ROOT')
@@ -55,7 +110,7 @@ if __name__ == '__main__':
   par_sensor_curv = 325 ## sensor curvature (325mm for R12860)
 
   par_n_rays = 101
-  inc_angle = 10
+  inc_angle = -20
 
   #config = make_planar(par_din, par_dout, par_angle, par_width, par_height)
   config = make_winston(par_din, par_dout, par_angle, par_width, par_height)
@@ -78,13 +133,14 @@ if __name__ == '__main__':
   plt.plot([-config['din'] / 2, config['din'] / 2], [0, 0], '-.k', linewidth=0.5)
   plt.plot([0, 0], [0, 1.5 * rmax], '-.k', linewidth=0.5)
 
-  ### Trace a few sample rays
-  #for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
-  #  xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensor=config['sensor'])
-  #  color = {'exit':'b', 'bounced back':'r', 'bounce limit':'r', 'on sensor':'g'}
-  #  plt.xlabel('x (mm)')
-  #  plt.ylabel('y (mm)')
-  #  plt.plot(xs, ys, color[exit_type]+'-', linewidth=0.5)
+  ## Trace a few sample rays
+  for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
+    z0 = 0
+    xs, ys, zs, exit_type = propagate(x0, par_height - 1, z0, inc_angle, config['mirrors'], sensor=config['sensor'])
+    color = {'exit':'b', 'bounced back':'r', 'bounce limit':'r', 'on sensor':'g'}
+    plt.xlabel('x (mm)')
+    plt.ylabel('y (mm)')
+    plt.plot(xs, ys, color[exit_type]+'-', linewidth=0.5)
 
   plt.xlim(-rmax, rmax)
   plt.ylim(-0.2 * rmax, 1.2 * rmax)

@@ -8,8 +8,9 @@ import sys
 sys.path.append('python')
 from ConeProfile import *
 
+tol = 1e-7
+
 def findSegments(x0, y0, vx, vy, mx, my):
-  tol = 1e-3
   dmx = mx[1:]-mx[:-1]
   dmy = my[1:]-my[:-1]
 
@@ -57,7 +58,6 @@ def reflect(vx, vy, dx, dy):
   return ux, uy
 
 def propagate(x0, y0, angle, mirrors, sensor=None, n_bounces=20):
-  tol = 1e-7
   rad = np.deg2rad(angle-90)
   vx, vy = np.cos(rad), np.sin(rad)
   xs, ys = [x0], [y0]
@@ -105,8 +105,6 @@ def propagate(x0, y0, angle, mirrors, sensor=None, n_bounces=20):
         if bestR == None or r[irmin] < bestR:
           bestR, bestX, bestY = r[irmin], x[irmin], y[irmin]
           bestType = 'on sensor'
-          bestTangent = [dx[irmin], dy[irmin]]
-          #bestTangent = None
     ## Add a virtual layer to pick up rays escaping backwards
     if bestType == None:
       x, y, dx, dy = findSegments(x0, y0, vx, vy, np.array([xmin, xmax]), np.array([ymax, ymax]))
