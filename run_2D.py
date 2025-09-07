@@ -4,15 +4,23 @@ import matplotlib.pyplot as plt
 import mplhep as hep
 from tqdm import tqdm
 from numba import njit
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import sys
 sys.path.append('python')
 from ConeProfile import *
 
-tol = 1e-7
+tol: float = 1e-7
 
 @njit(cache=True)
-def findSegments(x0, y0, vx, vy, mx, my):
+def findSegments(
+    x0: float,
+    y0: float,
+    vx: float,
+    vy: float,
+    mx: np.ndarray,
+    my: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
   dmx = mx[1:] - mx[:-1]
   dmy = my[1:] - my[:-1]
 
@@ -39,7 +47,14 @@ def findSegments(x0, y0, vx, vy, mx, my):
   return x[hit], y[hit], dmx[hit], dmy[hit]
 
 @njit(cache=True)
-def getDist(x0, y0, vx, vy, x, y):
+def getDist(
+    x0: float,
+    y0: float,
+    vx: float,
+    vy: float,
+    x: np.ndarray,
+    y: np.ndarray,
+) -> np.ndarray:
   dx = x - x0
   dy = y - y0
   r = (vx * dx + vy * dy) / np.hypot(vx, vy)
@@ -47,7 +62,7 @@ def getDist(x0, y0, vx, vy, x, y):
   return r
 
 @njit(cache=True)
-def reflect(vx, vy, dx, dy):
+def reflect(vx: float, vy: float, dx: float, dy: float) -> Tuple[float, float]:
   dr = np.hypot(dx, dy)
   dx, dy = dx / dr, dy / dr
   nx, ny = -dy, dx
@@ -62,7 +77,14 @@ def reflect(vx, vy, dx, dy):
 
   return ux, uy
 
-def propagate(x0, y0, angle, mirrors, sensor=None, n_bounces=20):
+def propagate(
+    x0: float,
+    y0: float,
+    angle: float,
+    mirrors: List[Dict[str, Sequence[float]]],
+    sensor: Optional[Dict[str, Sequence[float]]] = None,
+    n_bounces: int = 20,
+) -> Tuple[np.ndarray, np.ndarray, str]:
   rad = np.deg2rad(angle-90)
   vx, vy = np.cos(rad), np.sin(rad)
   xs, ys = [x0], [y0]
