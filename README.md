@@ -5,14 +5,16 @@ Utilities for generating concentrator shapes using Python.
 The repository contains a single script, `run_2D.py`, which can build planar
 concentrators or Winston cones and trace sample rays through the geometry. The
 ray tracer is intentionally lightweight, making it easy to experiment with
-different parameters or prototype new designs.
+different parameters or prototype new designs. Core geometric routines are
+accelerated with [Numba](https://numba.pydata.org/) for faster ray-tracing
+scans.
 
 ## Setup
 
 Create and activate an Anaconda environment:
 
 ```bash
-conda create -n renecone -c conda-forge numpy matplotlib tqdm
+conda create -n renecone -c conda-forge numpy numba matplotlib tqdm
 conda activate renecone
 ```
 
