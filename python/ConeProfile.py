@@ -1,8 +1,15 @@
 #!/usr/bin/env python
 import numpy as np
+from typing import Dict, Optional, Sequence
 
-def make_planar(din, dout, angle, width, height):
-  config = {
+def make_planar(
+    din: float,
+    dout: float,
+    angle: float,
+    width: float,
+    height: float,
+) -> Dict[str, object]:
+  config: Dict[str, object] = {
     'name': 'planar',
     'n_walls': 4,
     'din': din,
@@ -23,8 +30,15 @@ def make_planar(din, dout, angle, width, height):
   return config
 
 
-def make_winston(din, dout, crit_angle, width, height, n_points=512):
-  config = {
+def make_winston(
+    din: float,
+    dout: float,
+    crit_angle: float,
+    width: float,
+    height: float,
+    n_points: int = 512,
+) -> Dict[str, object]:
+  config: Dict[str, object] = {
     'name': 'winston',
     'n_walls': 4,
     'din': din,
@@ -66,7 +80,11 @@ def make_winston(din, dout, crit_angle, width, height, n_points=512):
   return config
 
 
-def make_sensor(dout, sensor_curv=None, n_points=25):
+def make_sensor(
+    dout: float,
+    sensor_curv: Optional[float] = None,
+    n_points: int = 25,
+) -> Dict[str, Sequence[float]]:
   """Generate a sensing surface at the exit plane."""
   if sensor_curv is not None:
     x = np.linspace(-dout / 2, dout / 2, n_points)
