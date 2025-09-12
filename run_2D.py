@@ -13,14 +13,8 @@ from ConeProfile import *
 tol: float = 1e-7
 
 @njit(cache=True)
-def findSegments(
-    x0: float,
-    y0: float,
-    vx: float,
-    vy: float,
-    mx: np.ndarray,
-    my: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def findSegments(x0: float, y0: float, vx: float, vy: float,
+                 mx: np.ndarray, my: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
   dmx = mx[1:] - mx[:-1]
   dmy = my[1:] - my[:-1]
 
@@ -48,14 +42,9 @@ def findSegments(
   return x[hit], y[hit], nx[hit], ny[hit]
 
 @njit(cache=True)
-def getDist(
-    x0: float,
-    y0: float,
-    vx: float,
-    vy: float,
-    x: np.ndarray,
-    y: np.ndarray,
-) -> np.ndarray:
+def getDist(x0: float, y0: float,
+            x: np.ndarray, y: np.ndarray,
+            vx: float, vy: float) -> np.ndarray:
   dx = x - x0
   dy = y - y0
   r = (vx * dx + vy * dy) / np.hypot(vx, vy)
@@ -77,14 +66,10 @@ def reflect(vx: float, vy: float, nx: float, ny: float) -> Tuple[float, float]:
 
   return ux, uy
 
-def propagate(
-    x0: float,
-    y0: float,
-    angle: float,
-    mirrors: List[Dict[str, Sequence[float]]],
-    sensor: Optional[Dict[str, Sequence[float]]] = None,
-    n_bounces: int = 20,
-) -> Tuple[np.ndarray, np.ndarray, str]:
+def propagate(x0: float, y0: float, angle: float,
+              mirrors: List[Dict[str, Sequence[float]]],
+              sensor: Optional[Dict[str, Sequence[float]]] = None,
+              n_bounces: int = 20) -> Tuple[np.ndarray, np.ndarray, str]:
   rad = np.deg2rad(angle-90)
   vx, vy = np.cos(rad), np.sin(rad)
   xs, ys = [x0], [y0]
@@ -118,7 +103,7 @@ def propagate(
     for mx, my in zip(mxs, mys):
       x, y, dx, dy = findSegments(x0, y0, vx, vy, mx, my)
       if len(x) > 0:
-        r = getDist(x0, y0, vx, vy, x, y)
+        r = getDist(x0, y0, x, y, vx, vy)
         irmin = r.argmin()
         if bestR == None or r[irmin] < bestR:
           bestR, bestX, bestY = r[irmin], x[irmin], y[irmin]
@@ -127,7 +112,7 @@ def propagate(
     if sensor:
       x, y, dx, dy = findSegments(x0, y0, vx, vy, sx, sy)
       if len(x) > 0:
-        r = getDist(x0, y0, vx, vy, x, y)
+        r = getDist(x0, y0, x, y, vx, vy)
         irmin = r.argmin()
         if bestR == None or r[irmin] < bestR:
           bestR, bestX, bestY = r[irmin], x[irmin], y[irmin]
@@ -138,7 +123,7 @@ def propagate(
                                   np.array([xmin, xmax], dtype=np.float64),
                                   np.array([ymax, ymax], dtype=np.float64))
       if len(x) > 0:
-        r = getDist(x0, y0, vx, vy, x, y)
+        r = getDist(x0, y0, x, y, vx, vy)
         irmin = r.argmin()
         if bestR == None or r[irmin] < bestR:
           bestR, x0, y0 = r[irmin], x[irmin], y[irmin]
@@ -150,7 +135,7 @@ def propagate(
                                   np.array([xmin, xmax], dtype=np.float64),
                                   np.array([0, 0], dtype=np.float64))
       if len(x) > 0:
-        r = getDist(x0, y0, vx, vy, x, y)
+        r = getDist(x0, y0, x, y, vx, vy)
         irmin = r.argmin()
         if bestR == None or r[irmin] < bestR:
           bestR, x0, y0 = r[irmin], x[irmin], y[irmin]
