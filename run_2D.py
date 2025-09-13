@@ -45,8 +45,7 @@ def findSegments(x0: float, y0: float, vx: float, vy: float,
 def getDist(x0: float, y0: float,
             x: np.ndarray, y: np.ndarray,
             vx: float, vy: float) -> np.ndarray:
-  dx = x - x0
-  dy = y - y0
+  dx, dy = x - x0, y - y0
   r = (vx * dx + vy * dy) / np.hypot(vx, vy)
 
   return r
@@ -101,16 +100,16 @@ def propagate(x0: float, y0: float, angle: float,
     bestType = None
     bestTangent = None
     for mx, my in zip(mxs, mys):
-      x, y, dx, dy = findSegments(x0, y0, vx, vy, mx, my)
+      x, y, nx, ny = findSegments(x0, y0, vx, vy, mx, my)
       if len(x) > 0:
         r = getDist(x0, y0, x, y, vx, vy)
         irmin = r.argmin()
         if bestR == None or r[irmin] < bestR:
           bestR, bestX, bestY = r[irmin], x[irmin], y[irmin]
           bestType = 'mirror'
-          bestTangent = [dx[irmin], dy[irmin]]
+          bestTangent = [nx[irmin], ny[irmin]]
     if sensor:
-      x, y, dx, dy = findSegments(x0, y0, vx, vy, sx, sy)
+      x, y, nx, ny = findSegments(x0, y0, vx, vy, sx, sy)
       if len(x) > 0:
         r = getDist(x0, y0, x, y, vx, vy)
         irmin = r.argmin()
@@ -119,7 +118,7 @@ def propagate(x0: float, y0: float, angle: float,
           bestType = 'on sensor'
     ## Add a virtual layer to pick up rays escaping backwards
     if bestType == None:
-      x, y, dx, dy = findSegments(x0, y0, vx, vy,
+      x, y, nx, ny = findSegments(x0, y0, vx, vy,
                                   np.array([xmin, xmax], dtype=np.float64),
                                   np.array([ymax, ymax], dtype=np.float64))
       if len(x) > 0:
@@ -131,7 +130,7 @@ def propagate(x0: float, y0: float, angle: float,
     else:
       x0, y0 = bestX, bestY
     if bestType == None:
-      x, y, dx, dy = findSegments(x0, y0, vx, vy,
+      x, y, nx, ny = findSegments(x0, y0, vx, vy,
                                   np.array([xmin, xmax], dtype=np.float64),
                                   np.array([0, 0], dtype=np.float64))
       if len(x) > 0:
@@ -165,7 +164,8 @@ if __name__ == '__main__':
   par_angle = 20
   par_sensor_curv = 325 ## sensor curvature (325mm for R12860)
 
-  par_n_rays = 101
+  par_n_rays_vis = 101
+  par_n_rays = 10000
   inc_angle = -30
 
   #config = make_planar(par_din, par_dout, par_angle, par_width, par_height)
@@ -190,7 +190,7 @@ if __name__ == '__main__':
   plt.plot([0, 0], [0, 1.5 * rmax], '-.k', linewidth=0.5)
 
   ## Trace a few sample rays
-  for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
+  for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays_vis):
     xs, ys, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensor=config['sensor'])
     color = {'exit':'b', 'bounced back':'r', 'bounce limit':'r', 'on sensor':'g'}
     plt.xlabel('x (mm)')
@@ -208,7 +208,7 @@ if __name__ == '__main__':
   frac_entr = np.zeros(len(inc_angles))
   for i, inc_angle in enumerate(tqdm(inc_angles)):
     n_pass, n_entr = 0, 0
-    for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
+    for x0 in np.random.uniform(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
       _, _, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensor=config['sensor'])
       if exit_type == 'on sensor':
         n_pass += 1
