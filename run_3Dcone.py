@@ -57,7 +57,9 @@ def findSegments(x0: float, y0: float, z0: float,
   z = z0 + t * vz
   w = np.hypot(x,z)
 
-  hit = (t > tol) & ((y - mh[1:])*(y - mh[:-1]) < 0) & ((w - mw[1:])*(w - mw[:-1]) < 0)
+  wabs = np.abs(mw)
+  hit = (t > tol) & ((y - mh[1:])*(y - mh[:-1]) <= 0) \
+        & ((w - wabs[1:])*(w - wabs[:-1]) <= 0)
 
   ny = -dmw
   nw = dmh
@@ -106,7 +108,7 @@ def propagate(x0: float, y0: float, z0: float, angle: float,
 
   mws, mhs = [], []
   for mirror in mirrors:
-    mw = np.array(mirror['x'], dtype=np.float64)
+    mw = np.abs(np.array(mirror['x'], dtype=np.float64))
     mh = np.array(mirror['y'], dtype=np.float64)
     mws.append(mw)
     mhs.append(mh)
