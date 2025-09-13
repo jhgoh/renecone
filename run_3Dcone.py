@@ -57,7 +57,7 @@ def findSegments(x0: float, y0: float, z0: float,
   z = z0 + t * vz
   w = np.hypot(x,z)
 
-  hit = (t > tol) & ((y - mh[1:])*(y - mh[:-1]) < 0) & ((w - mw[:1])*(w - mw[:-1]) < 0)
+  hit = (t > tol) & ((y - mh[1:])*(y - mh[:-1]) < 0) & ((w - mw[1:])*(w - mw[:-1]) < 0)
 
   ny = -dmw
   nw = dmh
