@@ -17,52 +17,54 @@ def findSegments(x0: float, y0: float, z0: float,
                  vx: float, vy: float, vz: float,
                  mw: np.ndarray, mh: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray,
                                                           np.ndarray, np.ndarray, np.ndarray]:
+  vw = np.hypot(vx, vz)
+
   dmw = mw[1:] - mw[:-1]
   dmh = mh[1:] - mh[:-1]
-
-  vw = np.hypot(vx, vz)
+  nw, ny = -dmh, dmw
 
   dmh2 = dmh**2
   dmw2 = dmw**2
 
-  a = dmh2*vw*vw - dmw2*vz*vz
+  a = dmh2*(vw**2) - dmw2*(vy**2)
   b = dmh2*(vx*x0 + vz*z0) - dmw*vy*((y0-mh[:-1])*dmw + mw[:-1]*dmh)
   c = dmh2*(x0*x0 + z0*z0) - ((y0-mh[:-1])*dmw + mw[:-1]*dmh)**2
 
   t = np.full(dmw.shape, np.inf)
   
-  ## a=0, b!=0 case: 1 polynomial
   is2pol = np.abs(a) > tol
+  det = b**2 - a*c
+
+  ## a=0, b!=0 case: 1 polynomial
   mask = (~is2pol) & (np.abs(b) > tol)
-  t[mask] = c[mask]/2/b[mask]
+  t[mask] = -c[mask]/b[mask]/2
 
   ## a!=0, det=0 case: 2nd order polynomial but 1 solution
-  det = b**2 - a*c
-  has2 = np.abs(det) > tol
-  mask = is2pol & ~has2
+  mask = is2pol & (np.abs(det) <= tol)
   t[mask] = -b[mask]/a[mask]
 
   ## det > 0 case: two solutions. We take smaller one with positive solution
-  sol1 = np.full(t.shape, np.inf)
-  sol2 = np.full(t.shape, np.inf)
-  mask = is2pol & has2
-  sol1[mask] = (-b[mask] + np.sqrt(det[mask]))/a[mask]
-  sol2[mask] = (-b[mask] - np.sqrt(det[mask]))/a[mask]
-  sol1[sol1 < tol] = np.inf
-  sol2[sol2 < tol] = np.inf
-  t[mask] = np.minimum(sol1[mask], sol2[mask])
+  t1 = np.full(t.shape, np.inf)
+  t2 = np.full(t.shape, np.inf)
+  mask = is2pol & (det > tol)
+  rt = np.sqrt(det[mask])
+  t1[mask] = (-b[mask] + rt)/a[mask]
+  t2[mask] = (-b[mask] - rt)/a[mask]
+  t1[t1 <= tol] = np.inf
+  t2[t2 <= tol] = np.inf
+  t[mask] = np.minimum(t1[mask], t2[mask])
 
   x = x0 + t * vx
   y = y0 + t * vy
   z = z0 + t * vz
   w = np.hypot(x,z)
 
-  wabs = np.abs(mw)
-  hit = (t > tol) & ((y - mh[1:])*(y - mh[:-1]) <= 0) \
-        & ((w - wabs[1:])*(w - wabs[:-1]) <= 0)
+  branch = (dmh * w - dmw * y) - (dmh * mw[:-1] - dmw*mh[:-1])
+  tol_branch = tol*(np.abs(dmh)*w + np.abs(dmw)*np.abs(y) + np.abs(dmh * mw[:-1] - dmw*mh[:-1]) + 1.0)
+  s = ((w-mw[:-1])*dmw + (y-mh[:-1])*dmh) / (dmw2+dmh2)
+  hit = (t < np.inf) & (t > tol) & (w > tol) \
+        & ( s >= -tol ) & (s <= 1.0+tol) & (np.abs(branch) <= tol_branch)
 
-  ny = -dmw
-  nw = dmh
   nx = nw*x/w # = nw * cos(phi)
   nz = nw*z/w # = nw * sin(phi)
 
@@ -147,7 +149,7 @@ def propagate(x0: float, y0: float, z0: float, angle: float,
     ## Add a virtual layer to pick up rays escaping backwards
     if bestType == None:
       x, y, z, nx, ny, nz = findSegments(x0, y0, z0, vx, vy, vz,
-                                         np.array([-rmax, rmax]), np.array([ymax, ymax]))
+                                         np.array([0, rmax]), np.array([ymax, ymax]))
       if len(x) > 0:
         r = getDist(x0, y0, z0, x, y, z, vx, vy, vz)
         irmin = r.argmin()
@@ -158,7 +160,7 @@ def propagate(x0: float, y0: float, z0: float, angle: float,
       x0, y0, z0 = bestX, bestY, bestZ
     if bestType == None:
       x, y, z, nx, ny, nz = findSegments(x0, y0, z0, vx, vy, vz,
-                                         np.array([-rmax, rmax]), np.array([0, 0]))
+                                         np.array([0, rmax]), np.array([0, 0]))
       if len(x) > 0:
         r = getDist(x0, y0, z0, x, y, z, vx, vy, vz)
         irmin = r.argmin()
@@ -187,31 +189,42 @@ if __name__ == '__main__':
   par_width = 1200
   par_din = 1200
   par_dout = 460
-  #par_angle = 80
-  par_angle = 20
+  par_angle = 65
+  #par_angle = 20
   par_sensor_curv = 325 ## sensor curvature (325mm for R12860)
 
-  par_n_rays = 51
-  inc_angle = -30
+  par_n_rays = 41
+  inc_angle = 35
 
-  #config = make_planar(par_din, par_dout, par_angle, par_width, par_height)
-  config = make_winston(par_din, par_dout, par_angle, par_width, par_height)
-  config['sensor'] = make_sensor(par_dout, sensor_curv=par_sensor_curv)
+  config = make_planar(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
+  #config = make_winston(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
+  config['sensor'] = make_sensor(par_dout, sensor_curv=par_sensor_curv, n_points=3, sides=['right'])
   # print(config)
 
   fig, axes = plt.subplots(1, 2, figsize=(15,7))
+  thetas = np.linspace(0, 2*np.pi, 100)
 
   rmax = 0
   for shape in config['mirrors']:
     x, y = shape['x'], shape['y']
     x, y = np.array(x), np.array(y)
     axes[0].plot(x, y, 'k')
+    axes[0].plot(-x, y, 'k')
 
-    rmax = max(np.hypot(x, y).max(), rmax)
+    xmin, xmax = x.min(), x.max()
+    axes[1].plot(xmin*np.cos(thetas), xmin*np.sin(thetas), 'k')
+    axes[1].plot(xmax*np.cos(thetas), xmax*np.sin(thetas), 'k')
+
+    rmax = max(np.hypot(x,y).max(), rmax)
 
   ## Draw sensor surface
   x, y = config['sensor']['x'], config['sensor']['y']
   axes[0].plot(x, y, 'g', linewidth=2)
+  axes[0].plot(-x, y, 'g', linewidth=2)
+
+  xmin, xmax = x.min(), x.max()
+  axes[1].plot(xmin*np.cos(thetas), xmin*np.sin(thetas), 'g')
+  axes[1].plot(xmax*np.cos(thetas), xmax*np.sin(thetas), 'g')
 
   ## Draw axis
   axes[0].plot([-config['din'] / 2, config['din'] / 2], [0, 0], '-.k', linewidth=0.5)
@@ -228,7 +241,7 @@ if __name__ == '__main__':
 
     axes[1].set_xlabel('x (mm)')
     axes[1].set_ylabel('z (mm)')
-    axes[1].plot(ys, zs, color[exit_type]+'-', linewidth=0.5)
+    axes[1].plot(xs, zs, color[exit_type]+'-', linewidth=0.5)
 
   axes[0].set_xlim(-rmax, rmax)
   axes[0].set_ylim(-0.2 * rmax, 1.2 * rmax)
