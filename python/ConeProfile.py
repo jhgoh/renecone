@@ -2,13 +2,8 @@
 import numpy as np
 from typing import Dict, Optional, Sequence
 
-def make_planar(
-    din: float,
-    dout: float,
-    angle: float,
-    width: float,
-    height: float,
-) -> Dict[str, object]:
+def make_planar(din: float, dout: float, angle: float, width: float, height: float,
+                sides: Optional[Sequence[str]] = ['left', 'right']) -> Dict[str, object]:
   config: Dict[str, object] = {
     'name': 'planar',
     'n_walls': 4,
@@ -19,25 +14,25 @@ def make_planar(
   }
 
   ## Left and right walls
-  config['mirrors'].append({'x': [-width / 2, -width / 2], 'y': [0, height]})
-  config['mirrors'].append({'x': [width / 2, width / 2], 'y': [0, height]})
+  if 'left' in sides:
+    config['mirrors'].append({'x': [-width / 2, -width / 2], 'y': [0, height]})
+  if 'right' in sides:
+    config['mirrors'].append({'x': [width / 2, width / 2], 'y': [0, height]})
 
   ## Main mirrors
   h = dout * np.tan(np.deg2rad(90-angle))
-  config['mirrors'].append({'x': [dout / 2, din / 2], 'y': [0, h]})
-  config['mirrors'].append({'x': [-dout / 2, -din / 2], 'y': [0, h]})
+  if 'left' in sides:
+    config['mirrors'].append({'x': [-dout / 2, -din / 2], 'y': [0, h]})
+  if 'right' in sides:
+    config['mirrors'].append({'x': [dout / 2, din / 2], 'y': [0, h]})
 
   return config
 
 
-def make_winston(
-    din: float,
-    dout: float,
-    crit_angle: float,
-    width: float,
-    height: float,
-    n_points: int = 512,
-) -> Dict[str, object]:
+def make_winston(din: float, dout: float, crit_angle: float,
+                 width: float, height: float,
+                 n_points: int = 512,
+                 sides: Optional[Sequence[str]] = ['left', 'right']) -> Dict[str, object]:
   config: Dict[str, object] = {
     'name': 'winston',
     'n_walls': 4,
@@ -48,8 +43,10 @@ def make_winston(
   }
 
   ## Left and right walls
-  config['mirrors'].append({'x': [-width / 2, -width / 2], 'y': [0, height]})
-  config['mirrors'].append({'x': [width / 2, width / 2], 'y': [0, height]})
+  if 'left' in sides:
+    config['mirrors'].append({'x': [-width / 2, -width / 2], 'y': [0, height]})
+  if 'right' in sides:
+    config['mirrors'].append({'x': [width / 2, width / 2], 'y': [0, height]})
 
   ## Main mirrors
   crit_angle = np.deg2rad(crit_angle)
@@ -74,22 +71,25 @@ def make_winston(
   x_coords = x_coords[sel_idx]
   y_coords = y_coords[sel_idx]
 
-  config['mirrors'].append({'x': x_coords, 'y': y_coords})
-  config['mirrors'].append({'x': -x_coords, 'y': y_coords})
+  if 'left' in sides:
+    config['mirrors'].append({'x': -x_coords, 'y': y_coords})
+  if 'right' in sides:
+    config['mirrors'].append({'x': x_coords, 'y': y_coords})
 
   return config
 
 
-def make_sensor(
-    dout: float,
-    sensor_curv: Optional[float] = None,
-    n_points: int = 25,
-) -> Dict[str, Sequence[float]]:
+def make_sensor(dout: float, sensor_curv: Optional[float] = None,
+                n_points: int = 25,
+                sides: Optional[Sequence[str]] = ['left', 'right']) -> Dict[str, Sequence[float]]:
   """Generate a sensing surface at the exit plane."""
+  xmin = -dout / 2 if 'left' in sides else 0
+  xmax = dout / 2 if 'right' in sides else 0
+
   if sensor_curv is not None:
-    x = np.linspace(-dout / 2, dout / 2, n_points)
+    x = np.linspace(xmin, xmax, n_points)
     sagitta = np.sqrt(sensor_curv**2 - (dout / 2)**2)
     y = np.sqrt(sensor_curv**2 - x**2) - sagitta
     return {'x': x, 'y': y}
-  return {'x': [-dout / 2, dout / 2], 'y': [0, 0]}
+  return {'x': [xmin, xmax], 'y': [0, 0]}
 
