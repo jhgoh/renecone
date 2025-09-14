@@ -17,8 +17,9 @@ def findSegments(x0: float, y0: float, vx: float, vy: float,
                  mx: np.ndarray, my: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
   dmx = mx[1:] - mx[:-1]
   dmy = my[1:] - my[:-1]
+  nx, ny = -dmy, dmx
 
-  ss = vx * dmy - vy * dmx
+  ss = vx * nx + vy * ny
   ok = np.abs(ss) > tol
 
   qx = mx[:-1] - x0
@@ -27,8 +28,8 @@ def findSegments(x0: float, y0: float, vx: float, vy: float,
   t = np.full(ss.shape, np.inf)
   u = np.full(ss.shape, np.inf)
 
-  t[ok] = (qx[ok] * dmy[ok] - qy[ok] * dmx[ok]) / ss[ok]
-  u[ok] = (qx[ok] * vy - qy[ok] * vx) / ss[ok]
+  t[ok] = (qx[ok] * nx[ok] + qy[ok] * ny[ok]) / ss[ok]
+  u[ok] = (-qx[ok] * vy + qy[ok] * vx) / ss[ok]
 
   hit = ok & (t >= tol) & (u >= -tol) & (u <= 1 + tol)
   if not np.any(hit):
@@ -37,7 +38,6 @@ def findSegments(x0: float, y0: float, vx: float, vy: float,
 
   x = x0 + t * vx
   y = y0 + t * vy
-  nx, ny = -dmy, dmx
 
   return x[hit], y[hit], nx[hit], ny[hit]
 
