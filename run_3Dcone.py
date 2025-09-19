@@ -33,41 +33,49 @@ def findSegments(x0: float, y0: float, z0: float,
   b = dh2*(vx*x0 + vz*z0) - k*vy*dw
   c = dh2*(x0*x0 + z0*z0) - k**2
 
-  t = np.full(dw.shape, np.inf)
+  t1 = np.full(dw.shape, np.inf)
+  t2 = np.full(dw.shape, np.inf)
   
   is2pol = np.abs(a) > tol
   det = b**2 - a*c
 
   ## a=0, b!=0 case: 1 polynomial
   mask = (~is2pol) & (np.abs(b) > tol)
-  t[mask] = -c[mask]/b[mask]/2
+  t1[mask] = t2[mask] = -c[mask]/b[mask]/2
 
   ## a!=0, det=0 case: 2nd order polynomial but 1 solution
   mask = is2pol & (np.abs(det) <= tol)
-  t[mask] = -b[mask]/a[mask]
+  t1[mask] = t2[mask] = -b[mask]/a[mask]
 
   ## det > 0 case: two solutions. We take smaller one with positive solution
-  t1 = np.full(t.shape, np.inf)
-  t2 = np.full(t.shape, np.inf)
   mask = is2pol & (det > tol)
   rt = np.sqrt(det[mask])
   t1[mask] = (-b[mask] + rt)/a[mask]
   t2[mask] = (-b[mask] - rt)/a[mask]
   t1[t1 <= tol] = np.inf
   t2[t2 <= tol] = np.inf
-  t[mask] = np.minimum(t1[mask], t2[mask])
-  #t[mask] = np.maximum(t1[mask], t2[mask])
+  t1, t2 = np.minimum(t1, t2), np.maximum(t1, t2)
 
-  x = x0 + t * vx
-  y = y0 + t * vy
-  z = z0 + t * vz
-  w = np.hypot(x,z)
+  x = x0 + t1 * vx
+  y = y0 + t1 * vy
+  z = z0 + t1 * vz
+  w = np.hypot(x, z)
 
-  branch = (dh * w - dw * y) - (dh * mw[:-1] - dw*mh[:-1])
-  tol_branch = tol*(np.abs(dh)*w + np.abs(dw)*np.abs(y) + np.abs(dh * mw[:-1] - dw*mh[:-1]) + 1.0)
-  s = ((w-mw[:-1])*dw + (y-mh[:-1])*dh) / (dw2+dh2)
-  hit = (t < np.inf) & (t > tol) & (w > tol) \
-        & ( s >= -tol ) & (s <= 1.0+tol) & (np.abs(branch) <= tol_branch)
+  s = ((w - mw[:-1]) * dw + (y - mh[:-1]) * dh) / (dw2 + dh2)
+  branch = (dh*w - dw*y) - (dh*mw[:-1] - dw*mh[:-1])
+  tol_branch = tol*(np.abs(dh)*w + np.abs(dw)*np.abs(y) + np.abs(dh*mw[:-1] - dw*mh[:-1]) + 1.0)
+  hit1 = (t1 < np.inf) & (s >= -tol) & (s <= 1+tol) & (np.abs(branch) <= tol_branch) & (w > tol)
+
+  toSwap = (~hit1) & (t2 < np.inf)
+  x[toSwap] = x0 + t2[toSwap] * vx
+  y[toSwap] = y0 + t2[toSwap] * vy
+  z[toSwap] = z0 + t2[toSwap] * vz
+  w[toSwap] = np.hypot(x[toSwap], z[toSwap])
+
+  s = ((w - mw[:-1]) * dw + (y - mh[:-1]) * dh) / (dw2 + dh2)
+  branch = (dh*w - dw*y) - (dh*mw[:-1] - dw*mh[:-1])
+  tol_branch = tol*(np.abs(dh)*w + np.abs(dw)*np.abs(y) + np.abs(dh*mw[:-1] - dw*mh[:-1]) + 1.0)
+  hit = (s >= -tol) & (s <= 1+tol) & (np.abs(branch) <= tol_branch) & (w > tol)
 
   nx = nw*x/w # = nw * cos(phi)
   nz = nw*z/w # = nw * sin(phi)
@@ -177,7 +185,7 @@ def propagate(x0: float, y0: float, z0: float, angle: float,
     zs.append(z0)
 
     if bestType != 'mirror':
-      #exit_type = bestType if bestType else 'bounced back'
+      exit_type = bestType if bestType else 'bounced back'
       break
 
     vx, vy, vz = reflect(vx, vy, vz, *bestTangent)
@@ -191,18 +199,16 @@ if __name__ == '__main__':
   par_height = 1200
   par_width = 1200
   par_din = 1200
-  #par_dout = 460
-  par_dout = 760
-  par_angle = 80
-  #par_angle = 20
-  #par_sensor_curv = 325 ## sensor curvature (325mm for R12860)
-  par_sensor_curv = par_dout/2+1 ## sensor curvature (325mm for R12860)
+  par_dout = 460
+  #par_angle = 30
+  par_angle = 20
+  par_sensor_curv = 325 ## sensor curvature (325mm for R12860)
 
   par_n_rays = 51
-  inc_angle = 0
+  inc_angle = 20
 
-  config = make_planar(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
-  #config = make_winston(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
+  #config = make_planar(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
+  config = make_winston(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
   config['sensor'] = make_sensor(par_dout, sensor_curv=par_sensor_curv, n_points=32, sides=['right'])
   #config['sensor'] = make_sensor(par_dout, sensor_curv=None, sides=['right'])
 
@@ -239,7 +245,8 @@ if __name__ == '__main__':
   ## Trace a few sample rays
   for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
     z0 = 0
-    xs, ys, zs, exit_type = propagate(x0, par_height - 1, z0, inc_angle, config['mirrors'], sensor=config['sensor'])
+    #xs, ys, zs, exit_type = propagate(x0, par_height - 1, z0, inc_angle, config['mirrors'], sensor=config['sensor'])
+    xs, ys, zs, exit_type = propagate(z0, par_height - 1, x0, inc_angle, config['mirrors'], sensor=config['sensor'])
     color = {'exit':'b', 'bounced back':'r', 'bounce limit':'r', 'on sensor':'g'}
     axes[0].set_xlabel('x (mm)')
     axes[0].set_ylabel('y (mm)')
