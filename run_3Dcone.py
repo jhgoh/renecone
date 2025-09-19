@@ -19,18 +19,21 @@ def findSegments(x0: float, y0: float, z0: float,
                                                           np.ndarray, np.ndarray, np.ndarray]:
   vw = np.hypot(vx, vz)
 
-  dmw = mw[1:] - mw[:-1]
-  dmh = mh[1:] - mh[:-1]
-  nw, ny = -dmh, dmw
+  dw = mw[1:] - mw[:-1]
+  dh = mh[1:] - mh[:-1]
+  nw, ny = -dh, dw
 
-  dmh2 = dmh**2
-  dmw2 = dmw**2
+  dh2 = dh**2
+  dw2 = dw**2
 
-  a = dmh2*(vw**2) - dmw2*(vy**2)
-  b = dmh2*(vx*x0 + vz*z0) - dmw*vy*((y0-mh[:-1])*dmw + mw[:-1]*dmh)
-  c = dmh2*(x0*x0 + z0*z0) - ((y0-mh[:-1])*dmw + mw[:-1]*dmh)**2
+  hy0 = mh - y0
+  k = mw[:-1]*hy0[1:] - mw[1:]*hy0[:-1]
 
-  t = np.full(dmw.shape, np.inf)
+  a = dh2*(vw**2) - dw2*(vy**2)
+  b = dh2*(vx*x0 + vz*z0) - k*vy*dw
+  c = dh2*(x0*x0 + z0*z0) - k**2
+
+  t = np.full(dw.shape, np.inf)
   
   is2pol = np.abs(a) > tol
   det = b**2 - a*c
@@ -53,15 +56,16 @@ def findSegments(x0: float, y0: float, z0: float,
   t1[t1 <= tol] = np.inf
   t2[t2 <= tol] = np.inf
   t[mask] = np.minimum(t1[mask], t2[mask])
+  #t[mask] = np.maximum(t1[mask], t2[mask])
 
   x = x0 + t * vx
   y = y0 + t * vy
   z = z0 + t * vz
   w = np.hypot(x,z)
 
-  branch = (dmh * w - dmw * y) - (dmh * mw[:-1] - dmw*mh[:-1])
-  tol_branch = tol*(np.abs(dmh)*w + np.abs(dmw)*np.abs(y) + np.abs(dmh * mw[:-1] - dmw*mh[:-1]) + 1.0)
-  s = ((w-mw[:-1])*dmw + (y-mh[:-1])*dmh) / (dmw2+dmh2)
+  branch = (dh * w - dw * y) - (dh * mw[:-1] - dw*mh[:-1])
+  tol_branch = tol*(np.abs(dh)*w + np.abs(dw)*np.abs(y) + np.abs(dh * mw[:-1] - dw*mh[:-1]) + 1.0)
+  s = ((w-mw[:-1])*dw + (y-mh[:-1])*dh) / (dw2+dh2)
   hit = (t < np.inf) & (t > tol) & (w > tol) \
         & ( s >= -tol ) & (s <= 1.0+tol) & (np.abs(branch) <= tol_branch)
 
@@ -119,13 +123,13 @@ def propagate(x0: float, y0: float, z0: float, angle: float,
     ymax = mh.max() if ymax == None else max(ymax, mh.max())
 
   if sensor:
-    sx = np.array(sensor['x'], dtype=np.float64)
+    sx = np.abs(np.array(sensor['x'], dtype=np.float64))
     sy = np.array(sensor['y'], dtype=np.float64)
 
     rmax = sx.max() if rmax == None else max(rmax, np.abs(sx.min()), sx.max())
     ymax = sy.max() if ymax == None else max(ymax, sy.max())
 
-  while n_bounces >= 0:
+  for _ in range(n_bounces):
     bestR, bestX, bestY, bestZ = None, None, None, None
     bestType = None
     bestTangent = None
@@ -147,20 +151,20 @@ def propagate(x0: float, y0: float, z0: float, angle: float,
           bestR, bestX, bestY, bestZ = r[irmin], x[irmin], y[irmin], z[irmin]
           bestType = 'on sensor'
     ## Add a virtual layer to pick up rays escaping backwards
-    if bestType == None:
+    if bestType != None:
+      x0, y0, z0 = bestX, bestY, bestZ
+    else:
       x, y, z, nx, ny, nz = findSegments(x0, y0, z0, vx, vy, vz,
-                                         np.array([0, rmax]), np.array([ymax, ymax]))
+                                         np.array([0, 2*rmax]), np.array([1.1*ymax, 1.1*ymax]))
       if len(x) > 0:
         r = getDist(x0, y0, z0, x, y, z, vx, vy, vz)
         irmin = r.argmin()
         if bestR == None or r[irmin] < bestR:
           bestR, x0, y0, z0 = r[irmin], x[irmin], y[irmin], z[irmin]
           bestType = 'bounced back'
-    else:
-      x0, y0, z0 = bestX, bestY, bestZ
     if bestType == None:
       x, y, z, nx, ny, nz = findSegments(x0, y0, z0, vx, vy, vz,
-                                         np.array([0, rmax]), np.array([0, 0]))
+                                         np.array([0, 2*rmax]), np.array([0, 0]))
       if len(x) > 0:
         r = getDist(x0, y0, z0, x, y, z, vx, vy, vz)
         irmin = r.argmin()
@@ -172,12 +176,11 @@ def propagate(x0: float, y0: float, z0: float, angle: float,
     ys.append(y0)
     zs.append(z0)
 
-    if bestType == 'mirror':
-      n_bounces -= 1
-      vx, vy, vz = reflect(vx, vy, vz, *bestTangent)
-    else:
-      exit_type = bestType if bestType else 'bounced back'
+    if bestType != 'mirror':
+      #exit_type = bestType if bestType else 'bounced back'
       break
+
+    vx, vy, vz = reflect(vx, vy, vz, *bestTangent)
 
   return np.array(xs), np.array(ys), np.array(zs), exit_type
 
@@ -188,18 +191,20 @@ if __name__ == '__main__':
   par_height = 1200
   par_width = 1200
   par_din = 1200
-  par_dout = 460
-  par_angle = 65
+  #par_dout = 460
+  par_dout = 760
+  par_angle = 80
   #par_angle = 20
-  par_sensor_curv = 325 ## sensor curvature (325mm for R12860)
+  #par_sensor_curv = 325 ## sensor curvature (325mm for R12860)
+  par_sensor_curv = par_dout/2+1 ## sensor curvature (325mm for R12860)
 
-  par_n_rays = 41
-  inc_angle = 35
+  par_n_rays = 51
+  inc_angle = 0
 
   config = make_planar(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
   #config = make_winston(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
-  config['sensor'] = make_sensor(par_dout, sensor_curv=par_sensor_curv, n_points=3, sides=['right'])
-  # print(config)
+  config['sensor'] = make_sensor(par_dout, sensor_curv=par_sensor_curv, n_points=32, sides=['right'])
+  #config['sensor'] = make_sensor(par_dout, sensor_curv=None, sides=['right'])
 
   fig, axes = plt.subplots(1, 2, figsize=(15,7))
   thetas = np.linspace(0, 2*np.pi, 100)
@@ -219,6 +224,7 @@ if __name__ == '__main__':
 
   ## Draw sensor surface
   x, y = config['sensor']['x'], config['sensor']['y']
+  x, y = np.array(x), np.array(y)
   axes[0].plot(x, y, 'g', linewidth=2)
   axes[0].plot(-x, y, 'g', linewidth=2)
 
