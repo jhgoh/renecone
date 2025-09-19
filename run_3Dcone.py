@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+import argparse
+import csv
+
 import numpy as np
 import matplotlib.pyplot as plt
 import mplhep as hep
@@ -206,98 +209,126 @@ def propagate(
 
   return np.array(xs), np.array(ys), np.array(zs), exit_type
 
+def parse_args() -> argparse.Namespace:
+  parser = argparse.ArgumentParser(description='3D Winston cone ray tracing scan')
+  parser.add_argument('-o', '--output', required=True,
+                      help='Path to the CSV file where scan results are stored')
+  parser.add_argument('-q', '--quiet', action='store_true',
+                      help='Silent mode: skip drawing figures')
+  parser.add_argument('--height', type=float, default=1200,
+                      help='Height of the cone (mm)')
+  parser.add_argument('--width', type=float, default=1200,
+                      help='Width of the cone (mm)')
+  parser.add_argument('--din', type=float, default=1200,
+                      help='Entrance diameter (mm)')
+  parser.add_argument('--dout', type=float, default=460,
+                      help='Exit diameter (mm)')
+  parser.add_argument('--angle', type=float, default=20,
+                      help='Cone opening angle (deg)')
+  parser.add_argument('--sensor-curv', type=float, default=325,
+                      help='Sensor curvature radius (mm)')
+  parser.add_argument('--n-rays-vis', type=int, default=51,
+                      help='Number of rays to draw in the visualisation')
+  parser.add_argument('--n-rays', type=int, default=10000,
+                      help='Number of rays to trace per scan point')
+  parser.add_argument('--inc-angle', type=float, default=20,
+                      help='Incident angle for the visualised rays (deg)')
+  parser.add_argument('--scan-min', type=float, default=0,
+                      help='Minimum incident angle for the scan (deg)')
+  parser.add_argument('--scan-max', type=float, default=90,
+                      help='Maximum incident angle for the scan (deg)')
+  parser.add_argument('--scan-steps', type=int, default=200,
+                      help='Number of scan points between min and max angles')
+
+  return parser.parse_args()
+
+
 if __name__ == '__main__':
-  # plt.style.use('ROOT')
+  args = parse_args()
+
   hep.style.use(hep.style.CMS)
 
-  # --- Geometric configuration -------------------------------------------------
-  par_height = 1200
-  par_width = 1200
-  par_din = 1200
-  par_dout = 460
-  # par_angle = 30
-  par_angle = 20
-  par_sensor_curv = 325  # Sensor curvature (325 mm for R12860)
+  par_height = args.height
+  par_width = args.width
+  par_din = args.din
+  par_dout = args.dout
+  par_angle = args.angle
+  par_sensor_curv = args.sensor_curv
+  par_n_rays_vis = args.n_rays_vis
+  par_n_rays = args.n_rays
+  vis_inc_angle = args.inc_angle
 
-  # --- Ray-tracing controls ----------------------------------------------------
-  par_n_rays_vis = 51
-  par_n_rays = 10000
-  inc_angle = 20
-
-  # config = make_planar(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
   config = make_winston(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
   config['sensor'] = make_sensor(par_dout, sensor_curv=par_sensor_curv, n_points=32, sides=['right'])
-  # config['sensor'] = make_sensor(par_dout, sensor_curv=None, sides=['right'])
 
-  fig, axes = plt.subplots(1, 2, figsize=(15, 7))
-  plt.tight_layout(pad=3.0)
-  thetas = np.linspace(0, 2 * np.pi, 100)
+  radius = config['din'] / 2 * 0.9
 
-  rmax = 0
-  for shape in config['mirrors']:
-    x, y = shape['x'], shape['y']
+  if not args.quiet:
+    fig, axes = plt.subplots(1, 2, figsize=(15, 7))
+    plt.tight_layout(pad=3.0)
+    thetas = np.linspace(0, 2 * np.pi, 100)
+
+    rmax = 0
+    for shape in config['mirrors']:
+      x, y = shape['x'], shape['y']
+      x, y = np.array(x), np.array(y)
+      axes[0].plot(x, y, 'k')
+      axes[0].plot(-x, y, 'k')
+
+      xmin, xmax = x.min(), x.max()
+      axes[1].plot(xmin * np.cos(thetas), xmin * np.sin(thetas), 'k')
+      axes[1].plot(xmax * np.cos(thetas), xmax * np.sin(thetas), 'k')
+
+      rmax = max(np.hypot(x, y).max(), rmax)
+
+    x, y = config['sensor']['x'], config['sensor']['y']
     x, y = np.array(x), np.array(y)
-    axes[0].plot(x, y, 'k')
-    axes[0].plot(-x, y, 'k')
+    axes[0].plot(x, y, 'g', linewidth=2)
+    axes[0].plot(-x, y, 'g', linewidth=2)
 
     xmin, xmax = x.min(), x.max()
-    axes[1].plot(xmin * np.cos(thetas), xmin * np.sin(thetas), 'k')
-    axes[1].plot(xmax * np.cos(thetas), xmax * np.sin(thetas), 'k')
+    axes[1].plot(xmin * np.cos(thetas), xmin * np.sin(thetas), 'g')
+    axes[1].plot(xmax * np.cos(thetas), xmax * np.sin(thetas), 'g')
 
-    rmax = max(np.hypot(x, y).max(), rmax)
+    axes[0].plot([-config['din'] / 2, config['din'] / 2], [0, 0], '-.k', linewidth=0.5)
+    axes[0].plot([0, 0], [0, 1.5 * rmax], '-.k', linewidth=0.5)
 
-  # Draw sensor surface
-  x, y = config['sensor']['x'], config['sensor']['y']
-  x, y = np.array(x), np.array(y)
-  axes[0].plot(x, y, 'g', linewidth=2)
-  axes[0].plot(-x, y, 'g', linewidth=2)
+    span = config['din'] / 2 * 0.9
+    for x0 in np.linspace(-span, span, par_n_rays_vis):
+      z0 = 0
+      xs, ys, zs, exit_type = propagate(z0, par_height - 1, x0, vis_inc_angle,
+                                         config['mirrors'], sensor=config['sensor'])
+      color = {'exit': 'b', 'bounced back': 'r', 'bounce limit': 'r', 'on sensor': 'g'}
+      axes[0].set_xlabel('x (mm)')
+      axes[0].set_ylabel('y (mm)')
+      axes[0].plot(xs, np.hypot(ys, zs), color[exit_type] + '-', linewidth=0.5)
 
-  xmin, xmax = x.min(), x.max()
-  axes[1].plot(xmin * np.cos(thetas), xmin * np.sin(thetas), 'g')
-  axes[1].plot(xmax * np.cos(thetas), xmax * np.sin(thetas), 'g')
+      axes[1].set_xlabel('x (mm)')
+      axes[1].set_ylabel('z (mm)')
+      axes[1].plot(xs, zs, color[exit_type] + '-', linewidth=0.5)
 
-  # Draw axis
-  axes[0].plot([-config['din'] / 2, config['din'] / 2], [0, 0], '-.k', linewidth=0.5)
-  axes[0].plot([0, 0], [0, 1.5 * rmax], '-.k', linewidth=0.5)
+    axes[0].set_xlim(-rmax, rmax)
+    axes[0].set_ylim(-0.2 * rmax, 1.2 * rmax)
+    axes[0].set_aspect('equal', adjustable='box')
 
-  # Trace a few sample rays
-  span = config['din'] / 2 * 0.9
-  for x0 in np.linspace(-span, span, par_n_rays_vis):
-    z0 = 0
-    # xs, ys, zs, exit_type = propagate(x0, par_height - 1, z0, inc_angle, config['mirrors'], sensor=config['sensor'])
-    xs, ys, zs, exit_type = propagate(z0, par_height - 1, x0, inc_angle, config['mirrors'], sensor=config['sensor'])
-    color = {'exit': 'b', 'bounced back': 'r', 'bounce limit': 'r', 'on sensor': 'g'}
-    axes[0].set_xlabel('x (mm)')
-    axes[0].set_ylabel('y (mm)')
-    axes[0].plot(xs, np.hypot(ys, zs), color[exit_type] + '-', linewidth=0.5)
+    axes[1].set_xlim(-rmax, rmax)
+    axes[1].set_ylim(-rmax, rmax)
+    axes[1].set_aspect('equal', adjustable='box')
+    plt.show()
 
-    axes[1].set_xlabel('x (mm)')
-    axes[1].set_ylabel('z (mm)')
-    axes[1].plot(xs, zs, color[exit_type] + '-', linewidth=0.5)
-
-  axes[0].set_xlim(-rmax, rmax)
-  axes[0].set_ylim(-0.2 * rmax, 1.2 * rmax)
-  axes[0].set_aspect('equal', adjustable='box')
-
-  axes[1].set_xlim(-rmax, rmax)
-  axes[1].set_ylim(-rmax, rmax)
-  axes[1].set_aspect('equal', adjustable='box')
-  plt.show()
-
-  # Start scanning over the incident angle
-  inc_angles = np.linspace(0, 90, 200)
+  inc_angles = np.linspace(args.scan_min, args.scan_max, args.scan_steps)
   frac_pass = np.zeros(len(inc_angles))
   frac_entr = np.zeros(len(inc_angles))
   for i, inc_angle in enumerate(tqdm(inc_angles)):
     n_pass, n_entr = 0, 0
 
-    radius = config['din'] / 2 * 0.9
     theta0s = np.random.uniform(0, 2 * np.pi, par_n_rays)
     r0s = radius * np.sqrt(np.random.uniform(0, 1, par_n_rays))
     x0s, z0s = r0s * np.cos(theta0s), r0s * np.sin(theta0s)
 
     for x0, z0 in zip(x0s, z0s):
-      xs, ys, zs, exit_type = propagate(z0, par_height - 1, x0, inc_angle, config['mirrors'], sensor=config['sensor'])
+      xs, ys, zs, exit_type = propagate(z0, par_height - 1, x0, inc_angle,
+                                         config['mirrors'], sensor=config['sensor'])
       if exit_type == 'on sensor':
         n_pass += 1
       elif exit_type == 'bounced back':
@@ -305,9 +336,17 @@ if __name__ == '__main__':
     frac_pass[i] = n_pass / par_n_rays
     frac_entr[i] = n_entr / par_n_rays
 
-  plt.plot(inc_angles, frac_pass, 'b.-', label='on sensor')
-  plt.plot(inc_angles, frac_entr, 'r.-', label='bounced back')
-  plt.xlabel('Indicent angle (deg)')
-  plt.ylabel('Fraction')
-  plt.legend()
-  plt.show()
+  if not args.quiet:
+    plt.plot(inc_angles, frac_pass, 'b.-', label='on sensor')
+    plt.plot(inc_angles, frac_entr, 'r.-', label='bounced back')
+    plt.xlabel('Indicent angle (deg)')
+    plt.ylabel('Fraction')
+    plt.legend()
+    plt.show()
+
+  with open(args.output, 'w', newline='') as csvfile:
+    writer = csv.writer(csvfile)
+    writer.writerow(['inc_angle_deg', 'fraction_on_sensor', 'fraction_bounced_back'])
+    for angle, frac_on_sensor, frac_bounced in zip(inc_angles, frac_pass, frac_entr):
+      writer.writerow([angle, frac_on_sensor, frac_bounced])
+
