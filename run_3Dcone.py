@@ -204,7 +204,8 @@ if __name__ == '__main__':
   par_angle = 20
   par_sensor_curv = 325 ## sensor curvature (325mm for R12860)
 
-  par_n_rays = 51
+  par_n_rays_vis = 51
+  par_n_rays = 10000
   inc_angle = 20
 
   #config = make_planar(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
@@ -213,6 +214,7 @@ if __name__ == '__main__':
   #config['sensor'] = make_sensor(par_dout, sensor_curv=None, sides=['right'])
 
   fig, axes = plt.subplots(1, 2, figsize=(15,7))
+  plt.tight_layout(pad=3.0)
   thetas = np.linspace(0, 2*np.pi, 100)
 
   rmax = 0
@@ -243,7 +245,7 @@ if __name__ == '__main__':
   axes[0].plot([0, 0], [0, 1.5 * rmax], '-.k', linewidth=0.5)
 
   ## Trace a few sample rays
-  for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
+  for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays_vis):
     z0 = 0
     #xs, ys, zs, exit_type = propagate(x0, par_height - 1, z0, inc_angle, config['mirrors'], sensor=config['sensor'])
     xs, ys, zs, exit_type = propagate(z0, par_height - 1, x0, inc_angle, config['mirrors'], sensor=config['sensor'])
@@ -266,23 +268,29 @@ if __name__ == '__main__':
   plt.show()
 
   ### Start scanning over the incident angle
-  #inc_angles = np.linspace(0, 90, 200)
-  #frac_pass = np.zeros(len(inc_angles))
-  #frac_entr = np.zeros(len(inc_angles))
-  #for i, inc_angle in enumerate(tqdm(inc_angles)):
-  #  n_pass, n_entr = 0, 0
-  #  for x0 in np.linspace(-config['din'] / 2 * 0.9, config['din'] / 2 * 0.9, par_n_rays):
-  #    _, _, exit_type = propagate(x0, par_height - 1, inc_angle, config['mirrors'], sensor=config['sensor'])
-  #    if exit_type == 'on sensor':
-  #      n_pass += 1
-  #    elif exit_type == 'bounced back':
-  #      n_entr += 1
-  #  frac_pass[i] = n_pass/par_n_rays
-  #  frac_entr[i] = n_entr/par_n_rays
+  inc_angles = np.linspace(0, 90, 200)
+  frac_pass = np.zeros(len(inc_angles))
+  frac_entr = np.zeros(len(inc_angles))
+  for i, inc_angle in enumerate(tqdm(inc_angles)):
+    n_pass, n_entr = 0, 0
 
-  #plt.plot(inc_angles, frac_pass, 'b.-', label='on sensor')
-  #plt.plot(inc_angles, frac_entr, 'r.-', label='bounced back')
-  #plt.xlabel('Indicent angle (deg)')
-  #plt.ylabel('Fraction')
-  #plt.legend()
-  #plt.show()
+    radius = config['din']/2*0.9
+    theta0s = np.random.uniform(0, 2*np.pi, par_n_rays)
+    r0s = radius*np.sqrt(np.random.uniform(0, 1, par_n_rays))
+    x0s, z0s = r0s*np.cos(theta0s), r0s*np.sin(theta0s)
+
+    for x0, z0 in zip(x0s, z0s):
+      xs, ys, zs, exit_type = propagate(z0, par_height - 1, x0, inc_angle, config['mirrors'], sensor=config['sensor'])
+      if exit_type == 'on sensor':
+        n_pass += 1
+      elif exit_type == 'bounced back':
+        n_entr += 1
+    frac_pass[i] = n_pass/par_n_rays
+    frac_entr[i] = n_entr/par_n_rays
+
+  plt.plot(inc_angles, frac_pass, 'b.-', label='on sensor')
+  plt.plot(inc_angles, frac_entr, 'r.-', label='bounced back')
+  plt.xlabel('Indicent angle (deg)')
+  plt.ylabel('Fraction')
+  plt.legend()
+  plt.show()
