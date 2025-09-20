@@ -35,12 +35,19 @@ If you prefer `pip`, install the same packages into a virtual environment.
 
 ## Quick start
 
-Run one of the scripts to render the shapes and trace a few sample rays:
+Run one of the scripts to render the shapes and trace a few sample rays.
+Both entry points require an output path where the scan summary will be
+written:
 
 ```bash
-python run_2D.py     # 2D profile
-python run_3Dcone.py # 3D demonstration
+python run_2D.py -o results_2d.csv         # 2D profile
+python run_3Dcone.py -o results_3d.csv     # 3D demonstration
 ```
+
+The CSV files contain the incident angle (in degrees) together with the
+fraction of rays that reach the sensor or are reflected back out of the
+entrance aperture. Re-running the script overwrites the file, so provide a
+unique name when exploring multiple configurations.
 
 On headless systems, or when running on a batch farm, you can use the
 non-interactive matplotlib backend:
@@ -54,6 +61,31 @@ The scripts will open a window (or generate an off‑screen figure) displaying t
 constructed geometry and ray paths. The last part of each script performs a scan
 over incidence angles and plots the transmission/entrance fractions, giving a
 quick way to evaluate performance.
+
+### Helpful command-line options
+
+Both scripts expose the same set of arguments:
+
+- `-o / --output` (required) – destination CSV file for the scan summary.
+- `-q / --quiet` – skip the matplotlib visualisations and run only the scan
+  (default: disabled).
+- `--height` – height of the cone in millimetres (default: 1200 mm).
+- `--width` – width of the cone in millimetres (default: 1200 mm).
+- `--din` – entrance diameter in millimetres (default: 1200 mm).
+- `--dout` – exit diameter in millimetres (default: 460 mm).
+- `--angle` – cone opening angle in degrees (default: 20°).
+- `--sensor-curv` – radius of curvature for the optional sensor surface
+  (default: 325 mm).
+- `--n-rays-vis` – number of rays to draw in the preview figure (defaults: 101
+  for the 2D script, 51 for the 3D script).
+- `--n-rays` – number of rays traced per scan point, higher values reduce
+  statistical noise (default: 10,000 rays).
+- `--inc-angle` – incident angle used in the preview plot (defaults: -30° for
+  2D, 20° for 3D).
+- `--scan-min` – minimum incident angle in degrees for the scan (default: 0°).
+- `--scan-max` – maximum incident angle in degrees for the scan (default: 90°).
+- `--scan-steps` – number of scan points between the minimum and maximum angles
+  (default: 200 steps).
 
 ## Customisation tips
 
