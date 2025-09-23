@@ -227,6 +227,8 @@ def parse_args() -> argparse.Namespace:
                       help='Cone opening angle (deg)')
   parser.add_argument('--sensor-curv', type=float, default=325,
                       help='Sensor curvature radius (mm)')
+  parser.add_argument('--mirror-type', choices=['winston', 'planar'], default='winston',
+                      help='Type of mirror profile used to build the concentrator')
   parser.add_argument('--n-rays-vis', type=int, default=51,
                       help='Number of rays to draw in the visualisation')
   parser.add_argument('--n-rays', type=int, default=10000,
@@ -258,7 +260,12 @@ if __name__ == '__main__':
   par_n_rays = args.n_rays
   vis_inc_angle = args.inc_angle
 
-  config = make_winston(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
+  if args.mirror_type == 'winston':
+    config = make_winston(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
+  elif args.mirror_type == 'planar':
+    config = make_planar(par_din, par_dout, par_angle, par_width, par_height, sides=['right'])
+  else:
+    raise ValueError(f"Unsupported mirror type: {args.mirror_type}")
   config['sensor'] = make_sensor(par_dout, sensor_curv=par_sensor_curv, n_points=32, sides=['right'])
 
   radius = config['din'] / 2 * 0.9
