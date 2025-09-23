@@ -76,6 +76,8 @@ Both scripts expose the same set of arguments:
 - `--angle` – cone opening angle in degrees (default: 20°).
 - `--sensor-curv` – radius of curvature for the optional sensor surface
   (default: 325 mm).
+- `--mirror-type` – choose between Winston (`winston`) and planar (`planar`)
+  mirror profiles (default: Winston).
 - `--n-rays-vis` – number of rays to draw in the preview figure (defaults: 101
   for the 2D script, 51 for the 3D script).
 - `--n-rays` – number of rays traced per scan point, higher values reduce
@@ -94,8 +96,9 @@ curvature are defined in the `__main__` sections of the example scripts. Update
 them directly or expose them through your own argument parser to explore
 different configurations. For more involved studies, you can:
 
-- Swap `make_winston` for `make_planar` (or a custom helper) to test alternative
-  shapes.
+- Pass `--mirror-type planar` to preview a simple flat-mirror concentrator in
+  place of the default Winston profile. For bespoke geometries, edit the script
+  to call your own helper routine.
 - Adjust `par_n_rays` and `par_n_rays_vis` to trade off runtime versus plotting
   density.
 - Inspect the `propagate` function to see how ray histories are stored if you
