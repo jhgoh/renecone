@@ -265,7 +265,7 @@ if __name__ == '__main__':
 
   if not args.quiet:
     fig, axes = plt.subplots(1, 2, figsize=(15, 7))
-    plt.tight_layout(pad=3.0)
+    plt.tight_layout(pad=2.0)
     thetas = np.linspace(0, 2 * np.pi, 100)
 
     rmax = 0
@@ -273,10 +273,10 @@ if __name__ == '__main__':
       x, y = shape['x'], shape['y']
       x, y = np.array(x), np.array(y)
       axes[0].plot(x, y, 'k')
-      axes[0].plot(-x, y, 'k')
+      #axes[0].plot(-x, y, 'k')
 
       xmin, xmax = x.min(), x.max()
-      axes[1].plot(xmin * np.cos(thetas), xmin * np.sin(thetas), 'k')
+      #axes[1].plot(xmin * np.cos(thetas), xmin * np.sin(thetas), 'k')
       axes[1].plot(xmax * np.cos(thetas), xmax * np.sin(thetas), 'k')
 
       rmax = max(np.hypot(x, y).max(), rmax)
@@ -284,13 +284,14 @@ if __name__ == '__main__':
     x, y = config['sensor']['x'], config['sensor']['y']
     x, y = np.array(x), np.array(y)
     axes[0].plot(x, y, 'g', linewidth=2)
-    axes[0].plot(-x, y, 'g', linewidth=2)
+    #axes[0].plot(-x, y, 'g', linewidth=2)
 
     xmin, xmax = x.min(), x.max()
     axes[1].plot(xmin * np.cos(thetas), xmin * np.sin(thetas), 'g')
     axes[1].plot(xmax * np.cos(thetas), xmax * np.sin(thetas), 'g')
 
-    axes[0].plot([-config['din'] / 2, config['din'] / 2], [0, 0], '-.k', linewidth=0.5)
+    #axes[0].plot([-config['din'] / 2, config['din'] / 2], [0, 0], '-.k', linewidth=0.5)
+    axes[0].plot([0, config['din'] / 2], [0, 0], '-.k', linewidth=0.5)
     axes[0].plot([0, 0], [0, 1.5 * rmax], '-.k', linewidth=0.5)
 
     span = config['din'] / 2 * 0.9
@@ -299,15 +300,17 @@ if __name__ == '__main__':
       xs, ys, zs, exit_type = propagate(z0, par_height - 1, x0, vis_inc_angle,
                                          config['mirrors'], sensor=config['sensor'])
       color = {'exit': 'b', 'bounced back': 'r', 'bounce limit': 'r', 'on sensor': 'g'}
-      axes[0].set_xlabel('x (mm)')
+      axes[0].set_xlabel('rho (mm)')
       axes[0].set_ylabel('y (mm)')
-      axes[0].plot(xs, np.hypot(ys, zs), color[exit_type] + '-', linewidth=0.5)
+      #axes[0].plot(xs, np.hypot(ys, zs), color[exit_type] + '-', linewidth=0.5)
+      axes[0].plot(np.hypot(xs, zs), ys, color[exit_type] + '-', linewidth=0.5)
 
       axes[1].set_xlabel('x (mm)')
       axes[1].set_ylabel('z (mm)')
       axes[1].plot(xs, zs, color[exit_type] + '-', linewidth=0.5)
 
-    axes[0].set_xlim(-rmax, rmax)
+    #axes[0].set_xlim(-rmax, rmax)
+    axes[0].set_xlim(-0.2 * rmax, rmax)
     axes[0].set_ylim(-0.2 * rmax, 1.2 * rmax)
     axes[0].set_aspect('equal', adjustable='box')
 
