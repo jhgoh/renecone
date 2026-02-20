@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import sys
 sys.path.append('python')
 from ConeProfile import *
+from trace_outcomes import EXIT_COLOR
 
 tol: float = 1e-7
 
@@ -247,7 +248,7 @@ if __name__ == '__main__':
     for x0 in np.linspace(-radius, radius, par_n_rays_vis):
       xs, ys, exit_type = propagate(x0, par_height - 1, vis_inc_angle,
                                     config['mirrors'], sensor=config['sensor'])
-      color = {'exit': 'b', 'bounced back': 'r', 'bounce limit': 'r', 'on sensor': 'g'}
+      color = EXIT_COLOR
       plt.xlabel('x (mm)')
       plt.ylabel('y (mm)')
       plt.plot(xs, ys, color[exit_type] + '-', linewidth=0.5)
@@ -260,8 +261,10 @@ if __name__ == '__main__':
   inc_angles = np.linspace(args.scan_min, args.scan_max, args.scan_steps)
   frac_pass = np.zeros(len(inc_angles))
   frac_entr = np.zeros(len(inc_angles))
+  frac_exit = np.zeros(len(inc_angles))
+  frac_blim = np.zeros(len(inc_angles))
   for i, inc_angle in enumerate(tqdm(inc_angles)):
-    n_pass, n_entr = 0, 0
+    n_pass, n_entr, n_exit, n_blim = 0, 0, 0, 0
     for x0 in np.random.uniform(-radius, radius, par_n_rays):
       _, _, exit_type = propagate(x0, par_height - 1, inc_angle,
                                   config['mirrors'], sensor=config['sensor'])
@@ -269,12 +272,20 @@ if __name__ == '__main__':
         n_pass += 1
       elif exit_type == 'bounced back':
         n_entr += 1
+      elif exit_type == 'exit':
+        n_exit += 1
+      elif exit_type == 'bounce limit':
+        n_blim += 1
     frac_pass[i] = n_pass / par_n_rays
     frac_entr[i] = n_entr / par_n_rays
+    frac_exit[i] = n_exit / par_n_rays
+    frac_blim[i] = n_blim / par_n_rays
 
   if not args.quiet:
     plt.plot(inc_angles, frac_pass, 'b.-', label='on sensor')
     plt.plot(inc_angles, frac_entr, 'r.-', label='bounced back')
+    plt.plot(inc_angles, frac_exit, 'k.-', label='exit')
+    plt.plot(inc_angles, frac_blim, 'm.-', label='bounce limit')
     plt.xlabel('Indicent angle (deg)')
     plt.ylabel('Fraction')
     plt.legend()
@@ -282,7 +293,7 @@ if __name__ == '__main__':
 
   with open(args.output, 'w', newline='') as csvfile:
     writer = csv.writer(csvfile)
-    writer.writerow(['inc_angle_deg', 'fraction_on_sensor', 'fraction_bounced_back'])
-    for angle, frac_on_sensor, frac_bounced in zip(inc_angles, frac_pass, frac_entr):
-      writer.writerow([angle, frac_on_sensor, frac_bounced])
+    writer.writerow(['inc_angle_deg', 'fraction_on_sensor', 'fraction_bounced_back', 'fraction_exit', 'fraction_bounce_limit'])
+    for angle, frac_on_sensor, frac_bounced, frac_exited, frac_bounce_limit in zip(inc_angles, frac_pass, frac_entr, frac_exit, frac_blim):
+      writer.writerow([angle, frac_on_sensor, frac_bounced, frac_exited, frac_bounce_limit])
 
