@@ -96,6 +96,8 @@ quick way to evaluate performance.
 
 `run_3Dhex.py` uses the common scan controls (`-o`, `-q`, `--height`, `--din`, `--dout`, `--n-rays-vis`, `--n-rays`, `--inc-angle`, `--scan-min`, `--scan-max`, `--scan-steps`) and adds:
 
+- `--jobs` – number of worker processes for the scan over incident angles. Use values greater than 1 to parallelise the hex scan across CPU cores (default: `1`).
+
 - `--y-knots` – comma-separated y positions in normalized height `[0, 1]` where
   intermediate ring sections are created (default: `0.25,0.5,0.75`).
 - `--scale-knots` – comma-separated radial multipliers at the same knot
