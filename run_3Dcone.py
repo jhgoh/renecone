@@ -14,13 +14,27 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import sys
 sys.path.append('python')
 from ConeProfile import *
+from trace_outcomes import (
+    BOUNCED_BACK_CODE as _BOUNCED_BACK,
+    BOUNCE_LIMIT_CODE as _BOUNCE_LIMIT,
+    EXIT_CODE as _EXIT,
+    EXIT_COLOR,
+    MIRROR_CODE as _MIRROR,
+    ON_SENSOR_CODE as _ON_SENSOR,
+    UNKNOWN_CODE as _UNKNOWN,
+)
 
 tol: float = 1e-7  # Numerical tolerance
-_EXIT = 0
-_BOUNCED_BACK = 1
-_ON_SENSOR = 2
-_BOUNCE_LIMIT = 3
-_MIRROR = 10
+
+
+@njit(cache=True)
+def _classify_miss_by_direction(vy: float) -> int:
+  """Fallback classification when no boundary intersection is found."""
+  if vy > tol:
+    return _BOUNCED_BACK
+  if vy < -tol:
+    return _EXIT
+  return _UNKNOWN
 
 
 @njit(cache=True)
@@ -91,7 +105,7 @@ def _propagate_cone_exit_code(
           bestType = _EXIT
 
     if bestType == -1:
-      return _EXIT
+      return _classify_miss_by_direction(vy)
 
     x0, y0, z0 = bestX, bestY, bestZ
 
@@ -152,9 +166,9 @@ def _scan_one_angle_cone(
     ymax: float,
     n_rays: int,
     seed: int,
-) -> Tuple[int, int, int, int]:
+) -> Tuple[int, int, int, int, int]:
   rng = np.random.default_rng(seed)
-  n_pass, n_entr, n_esc, n_blim = 0, 0, 0, 0
+  n_pass, n_entr, n_exit, n_blim, n_unk = 0, 0, 0, 0, 0
 
   theta0s = rng.uniform(0, 2 * np.pi, n_rays)
   r0s = radius * np.sqrt(rng.uniform(0, 1, n_rays))
@@ -178,17 +192,21 @@ def _scan_one_angle_cone(
       n_pass += 1
     elif exit_code == _BOUNCED_BACK:
       n_entr += 1
+    elif exit_code == _EXIT:
+      n_exit += 1
     elif exit_code == _BOUNCE_LIMIT:
       n_blim += 1
+    elif exit_code == _UNKNOWN:
+      n_unk += 1
     else:
-      n_esc += 1
+      n_unk += 1
 
-  return n_pass, n_entr, n_esc, n_blim
+  return n_pass, n_entr, n_exit, n_blim, n_unk
 
 
 def _scan_one_angle_cone_from_args(
     args: Tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float, float, float, int, int]
-) -> Tuple[int, int, int, int]:
+) -> Tuple[int, int, int, int, int]:
   return _scan_one_angle_cone(*args)
 
 @njit(cache=True)
@@ -501,7 +519,7 @@ if __name__ == '__main__':
       z0 = 0
       xs, ys, zs, exit_type = propagate(z0, par_height - 1, x0, vis_inc_angle,
                                          config['mirrors'], sensor=config['sensor'])
-      color = {'exit': 'b', 'bounced back': 'r', 'bounce limit': 'r', 'on sensor': 'g'}
+      color = EXIT_COLOR
       axes[0].set_xlabel('x (mm)')
       axes[0].set_ylabel('y (mm)')
       axes[0].plot(xs, ys, color[exit_type] + '-', linewidth=0.5)
@@ -522,8 +540,9 @@ if __name__ == '__main__':
   inc_angles = np.linspace(args.scan_min, args.scan_max, args.scan_steps)
   frac_pass = np.zeros(len(inc_angles))
   frac_entr = np.zeros(len(inc_angles))
-  frac_esc = np.zeros(len(inc_angles))
+  frac_exit = np.zeros(len(inc_angles))
   frac_blim = np.zeros(len(inc_angles))
+  frac_unknown = np.zeros(len(inc_angles))
 
   n_jobs = max(1, args.jobs)
   seeds = np.random.SeedSequence(12345).generate_state(len(inc_angles), dtype=np.uint64)
@@ -531,7 +550,7 @@ if __name__ == '__main__':
   if n_jobs == 1:
     iterator = zip(inc_angles, seeds)
     for i, (inc_angle, seed) in enumerate(tqdm(iterator, total=len(inc_angles))):
-      n_pass, n_entr, n_esc, n_blim = _scan_one_angle_cone(
+      n_pass, n_entr, n_exit, n_blim, n_unk = _scan_one_angle_cone(
           inc_angle,
           mirror_ws,
           mirror_hs,
@@ -547,8 +566,9 @@ if __name__ == '__main__':
       )
       frac_pass[i] = n_pass / par_n_rays
       frac_entr[i] = n_entr / par_n_rays
-      frac_esc[i] = n_esc / par_n_rays
+      frac_exit[i] = n_exit / par_n_rays
       frac_blim[i] = n_blim / par_n_rays
+      frac_unknown[i] = n_unk / par_n_rays
   else:
     max_workers = min(n_jobs, os.cpu_count() or 1)
     tasks = [
@@ -558,17 +578,19 @@ if __name__ == '__main__':
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
       results = list(tqdm(executor.map(_scan_one_angle_cone_from_args, tasks), total=len(tasks)))
 
-    for i, (n_pass, n_entr, n_esc, n_blim) in enumerate(results):
+    for i, (n_pass, n_entr, n_exit, n_blim, n_unk) in enumerate(results):
       frac_pass[i] = n_pass / par_n_rays
       frac_entr[i] = n_entr / par_n_rays
-      frac_esc[i] = n_esc / par_n_rays
+      frac_exit[i] = n_exit / par_n_rays
       frac_blim[i] = n_blim / par_n_rays
+      frac_unknown[i] = n_unk / par_n_rays
 
   if not args.quiet:
     plt.plot(inc_angles, frac_pass, 'b.-', label='on sensor')
     plt.plot(inc_angles, frac_entr, 'r.-', label='bounced back')
-    plt.plot(inc_angles, frac_esc, 'k.-', label='escaped (unclassified)')
+    plt.plot(inc_angles, frac_exit, 'k.-', label='exit')
     plt.plot(inc_angles, frac_blim, 'm.-', label='bounce limit')
+    plt.plot(inc_angles, frac_unknown, 'c.-', label='unknown')
     plt.xlabel('Indicent angle (deg)')
     plt.ylabel('Fraction')
     plt.legend()
@@ -576,6 +598,6 @@ if __name__ == '__main__':
 
   with open(args.output, 'w', newline='') as csvfile:
     writer = csv.writer(csvfile)
-    writer.writerow(['inc_angle_deg', 'fraction_on_sensor', 'fraction_bounced_back', 'fraction_escaped_unclassified', 'fraction_bounce_limit'])
-    for angle, frac_on_sensor, frac_bounced, frac_escaped, frac_bounce_limit in zip(inc_angles, frac_pass, frac_entr, frac_esc, frac_blim):
-      writer.writerow([angle, frac_on_sensor, frac_bounced, frac_escaped, frac_bounce_limit])
+    writer.writerow(['inc_angle_deg', 'fraction_on_sensor', 'fraction_bounced_back', 'fraction_exit', 'fraction_bounce_limit', 'fraction_unknown'])
+    for angle, frac_on_sensor, frac_bounced, frac_exited, frac_bounce_limit, frac_unk in zip(inc_angles, frac_pass, frac_entr, frac_exit, frac_blim, frac_unknown):
+      writer.writerow([angle, frac_on_sensor, frac_bounced, frac_exited, frac_bounce_limit, frac_unk])

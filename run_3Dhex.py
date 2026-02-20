@@ -9,12 +9,18 @@ import numpy as np
 from numba import njit
 from tqdm import tqdm
 
+import sys
+sys.path.append('python')
+from trace_outcomes import (
+    BOUNCED_BACK_CODE as _BOUNCED_BACK,
+    BOUNCE_LIMIT_CODE as _BOUNCE_LIMIT,
+    EXIT_CODE as _EXIT,
+    EXIT_COLOR,
+    MIRROR_CODE as _MIRROR,
+    ON_SENSOR_CODE as _ON_SENSOR,
+)
 
 tol: float = 1e-7
-_EXIT = 0
-_BOUNCED_BACK = 1
-_ON_SENSOR = 2
-_BOUNCE_LIMIT = 3
 
 
 def _parse_csv_floats(value: str) -> np.ndarray:
@@ -207,7 +213,7 @@ def _propagate_hex_exit_code(
       hit = p + t * v
       if _point_in_quad_numba(hit, face):
         best_t = t
-        best_type = 10
+        best_type = _MIRROR
         best_point = hit
         best_normal = normal
 
@@ -231,7 +237,7 @@ def _propagate_hex_exit_code(
 
     p = best_point
 
-    if best_type != 10:
+    if best_type != _MIRROR:
       return best_type
 
     v = _reflect_numba(v, best_normal)
@@ -326,9 +332,9 @@ def _scan_one_angle_hex(
     n_rays: int,
     radius: float,
     seed: int,
-) -> Tuple[int, int]:
+) -> Tuple[int, int, int, int]:
   rng = np.random.default_rng(seed)
-  n_pass, n_entr = 0, 0
+  n_pass, n_entr, n_exit, n_blim = 0, 0, 0, 0
   x0s, z0s = _sample_hex_aperture_points(geom['top_xz'], radius, n_rays, rng)
 
   for x0, z0 in zip(x0s, z0s):
@@ -348,11 +354,15 @@ def _scan_one_angle_hex(
       n_pass += 1
     elif exit_code == _BOUNCED_BACK:
       n_entr += 1
+    elif exit_code == _EXIT:
+      n_exit += 1
+    elif exit_code == _BOUNCE_LIMIT:
+      n_blim += 1
 
-  return n_pass, n_entr
+  return n_pass, n_entr, n_exit, n_blim
 
 
-def _scan_one_angle_hex_from_args(args: Tuple[float, Dict[str, np.ndarray], float, int, float, int]) -> Tuple[int, int]:
+def _scan_one_angle_hex_from_args(args: Tuple[float, Dict[str, np.ndarray], float, int, float, int]) -> Tuple[int, int, int, int]:
   return _scan_one_angle_hex(*args)
 
 
@@ -433,7 +443,7 @@ if __name__ == '__main__':
       if not _point_in_convex_polygon_numba(x0, z0, geom['top_xz']):
         continue
       xs, ys, zs, exit_type = propagate_hex(x0, args.height - 1, z0, args.inc_angle, geom)
-      color = {'exit': 'b', 'bounced back': 'r', 'bounce limit': 'r', 'on sensor': 'g'}
+      color = EXIT_COLOR
       axes[0].plot(xs, ys, color[exit_type] + '-', linewidth=0.5)
       axes[1].plot(xs, zs, color[exit_type] + '-', linewidth=0.5)
 
@@ -448,6 +458,8 @@ if __name__ == '__main__':
   inc_angles = np.linspace(args.scan_min, args.scan_max, args.scan_steps)
   frac_pass = np.zeros(len(inc_angles))
   frac_entr = np.zeros(len(inc_angles))
+  frac_exit = np.zeros(len(inc_angles))
+  frac_blim = np.zeros(len(inc_angles))
 
   r = np.max(np.abs(geom['top_xz'])) * 0.9
   n_jobs = max(1, args.jobs)
@@ -456,9 +468,11 @@ if __name__ == '__main__':
   if n_jobs == 1:
     iterator = zip(inc_angles, seeds)
     for i, (inc_angle, seed) in enumerate(tqdm(iterator, total=len(inc_angles))):
-      n_pass, n_entr = _scan_one_angle_hex(inc_angle, geom, args.height, args.n_rays, r, int(seed))
+      n_pass, n_entr, n_exit, n_blim = _scan_one_angle_hex(inc_angle, geom, args.height, args.n_rays, r, int(seed))
       frac_pass[i] = n_pass / args.n_rays
       frac_entr[i] = n_entr / args.n_rays
+      frac_exit[i] = n_exit / args.n_rays
+      frac_blim[i] = n_blim / args.n_rays
   else:
     max_workers = min(n_jobs, os.cpu_count() or 1)
     tasks = [(float(ang), geom, args.height, args.n_rays, r, int(seed))
@@ -466,15 +480,19 @@ if __name__ == '__main__':
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
       results = list(tqdm(executor.map(_scan_one_angle_hex_from_args, tasks), total=len(tasks)))
 
-    for i, (n_pass, n_entr) in enumerate(results):
+    for i, (n_pass, n_entr, n_exit, n_blim) in enumerate(results):
       frac_pass[i] = n_pass / args.n_rays
       frac_entr[i] = n_entr / args.n_rays
+      frac_exit[i] = n_exit / args.n_rays
+      frac_blim[i] = n_blim / args.n_rays
 
   if not args.quiet:
     import matplotlib.pyplot as plt
 
     plt.plot(inc_angles, frac_pass, 'b.-', label='on sensor')
     plt.plot(inc_angles, frac_entr, 'r.-', label='bounced back')
+    plt.plot(inc_angles, frac_exit, 'k.-', label='exit')
+    plt.plot(inc_angles, frac_blim, 'm.-', label='bounce limit')
     plt.xlabel('Incident angle (deg)')
     plt.ylabel('Fraction')
     plt.legend()
@@ -482,6 +500,6 @@ if __name__ == '__main__':
 
   with open(args.output, 'w', newline='') as csvfile:
     writer = csv.writer(csvfile)
-    writer.writerow(['inc_angle_deg', 'fraction_on_sensor', 'fraction_bounced_back'])
-    for angle, frac_on_sensor, frac_bounced in zip(inc_angles, frac_pass, frac_entr):
-      writer.writerow([angle, frac_on_sensor, frac_bounced])
+    writer.writerow(['inc_angle_deg', 'fraction_on_sensor', 'fraction_bounced_back', 'fraction_exit', 'fraction_bounce_limit'])
+    for angle, frac_on_sensor, frac_bounced, frac_exited, frac_bounce_limit in zip(inc_angles, frac_pass, frac_entr, frac_exit, frac_blim):
+      writer.writerow([angle, frac_on_sensor, frac_bounced, frac_exited, frac_bounce_limit])
