@@ -557,6 +557,7 @@ if __name__ == '__main__':
   if not args.quiet:
     plt.plot(inc_angles, frac_pass, 'b.-', label='on sensor')
     plt.plot(inc_angles, frac_entr, 'r.-', label='bounced back')
+    plt.plot(inc_angles, frac_esc, 'k.-', label='escaped (unclassified)')
     plt.xlabel('Indicent angle (deg)')
     plt.ylabel('Fraction')
     plt.legend()
