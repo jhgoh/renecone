@@ -1,15 +1,20 @@
 #!/usr/bin/env python
 import argparse
 import csv
+import os
+from concurrent.futures import ProcessPoolExecutor
 from typing import Dict, List, Tuple
 
-import matplotlib.pyplot as plt
-import mplhep as hep
 import numpy as np
+from numba import njit
 from tqdm import tqdm
 
 
 tol: float = 1e-7
+_EXIT = 0
+_BOUNCED_BACK = 1
+_ON_SENSOR = 2
+_BOUNCE_LIMIT = 3
 
 
 def _parse_csv_floats(value: str) -> np.ndarray:
@@ -21,32 +26,50 @@ def _regular_polygon(radius: float, n_sides: int = 6) -> np.ndarray:
   return np.column_stack([radius * np.cos(phases), radius * np.sin(phases)])
 
 
+@njit(cache=True)
+def _dot3(a: np.ndarray, b: np.ndarray) -> float:
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
 def _point_in_convex_polygon(px: float, pz: float, poly: np.ndarray) -> bool:
-  signs = []
-  n = len(poly)
+  return _point_in_convex_polygon_numba(px, pz, poly)
+
+
+@njit(cache=True)
+def _point_in_convex_polygon_numba(px: float, pz: float, poly: np.ndarray) -> bool:
+  n = poly.shape[0]
+  has_pos = False
+  has_neg = False
   for i in range(n):
-    x1, z1 = poly[i]
-    x2, z2 = poly[(i + 1) % n]
+    x1, z1 = poly[i, 0], poly[i, 1]
+    j = (i + 1) % n
+    x2, z2 = poly[j, 0], poly[j, 1]
     cross = (x2 - x1) * (pz - z1) - (z2 - z1) * (px - x1)
-    if abs(cross) > tol:
-      signs.append(np.sign(cross))
-  if len(signs) == 0:
-    return False
-  signs = np.array(signs)
-  return np.all(signs >= 0) or np.all(signs <= 0)
+    if abs(cross) <= tol:
+      continue
+    if cross > 0:
+      has_pos = True
+    else:
+      has_neg = True
+    if has_pos and has_neg:
+      return False
+  return has_pos or has_neg
 
 
-def _point_in_triangle(point: np.ndarray, tri: np.ndarray) -> bool:
-  a, b, c = tri
+@njit(cache=True)
+def _point_in_triangle_numba(point: np.ndarray, tri: np.ndarray) -> bool:
+  a = tri[0]
+  b = tri[1]
+  c = tri[2]
   v0 = c - a
   v1 = b - a
   v2 = point - a
 
-  dot00 = np.dot(v0, v0)
-  dot01 = np.dot(v0, v1)
-  dot02 = np.dot(v0, v2)
-  dot11 = np.dot(v1, v1)
-  dot12 = np.dot(v1, v2)
+  dot00 = _dot3(v0, v0)
+  dot01 = _dot3(v0, v1)
+  dot02 = _dot3(v0, v2)
+  dot11 = _dot3(v1, v1)
+  dot12 = _dot3(v1, v2)
   denom = dot00 * dot11 - dot01 * dot01
   if abs(denom) < tol:
     return False
@@ -56,17 +79,28 @@ def _point_in_triangle(point: np.ndarray, tri: np.ndarray) -> bool:
   return (u >= -tol) and (v >= -tol) and (u + v <= 1 + tol)
 
 
-def _point_in_quad(point: np.ndarray, quad: np.ndarray) -> bool:
-  return _point_in_triangle(point, quad[[0, 1, 2]]) or _point_in_triangle(point, quad[[0, 2, 3]])
+@njit(cache=True)
+def _point_in_quad_numba(point: np.ndarray, quad: np.ndarray) -> bool:
+  tri0 = np.empty((3, 3), dtype=np.float64)
+  tri1 = np.empty((3, 3), dtype=np.float64)
+  tri0[0] = quad[0]
+  tri0[1] = quad[1]
+  tri0[2] = quad[2]
+  tri1[0] = quad[0]
+  tri1[1] = quad[2]
+  tri1[2] = quad[3]
+  return _point_in_triangle_numba(point, tri0) or _point_in_triangle_numba(point, tri1)
 
 
-def _reflect(v: np.ndarray, n: np.ndarray) -> np.ndarray:
-  n = n / np.linalg.norm(n)
-  proj = np.dot(v, n)
+@njit(cache=True)
+def _reflect_numba(v: np.ndarray, n: np.ndarray) -> np.ndarray:
+  n_norm = np.sqrt(_dot3(n, n))
+  n_unit = n / n_norm
+  proj = _dot3(v, n_unit)
   if proj > 0:
-    n = -n
+    n_unit = -n_unit
     proj = -proj
-  return v - 2 * proj * n
+  return v - 2 * proj * n_unit
 
 
 def make_faceted_hex_geometry(
@@ -116,7 +150,7 @@ def make_faceted_hex_geometry(
         continue
       n = n / n_norm
       face_center = quad.mean(axis=0)
-      if np.dot(n, center - face_center) < 0:
+      if n[0] * (center[0] - face_center[0]) + n[1] * (center[1] - face_center[1]) + n[2] * (center[2] - face_center[2]) < 0:
         n = -n
       faces.append(quad)
       normals.append(n)
@@ -130,6 +164,80 @@ def make_faceted_hex_geometry(
     'top_y': rings[-1][0, 1],
     'bot_y': rings[0][0, 1],
   }
+
+
+@njit(cache=True)
+def _propagate_hex_exit_code(
+    x0: float,
+    y0: float,
+    z0: float,
+    angle: float,
+    faces: np.ndarray,
+    normals: np.ndarray,
+    top_xz: np.ndarray,
+    bot_xz: np.ndarray,
+    top_y: float,
+    bot_y: float,
+    n_bounces: int = 40,
+) -> int:
+  rad = np.deg2rad(angle - 90)
+  p = np.array([x0, y0, z0], dtype=np.float64)
+  v = np.array([np.cos(rad), np.sin(rad), 0.0], dtype=np.float64)
+
+  for _ in range(n_bounces):
+    best_t = np.inf
+    best_type = -1
+    best_point = np.zeros(3, dtype=np.float64)
+    best_normal = np.zeros(3, dtype=np.float64)
+
+    for i in range(faces.shape[0]):
+      face = faces[i]
+      normal = normals[i]
+      denom = _dot3(v, normal)
+      if abs(denom) <= tol:
+        continue
+
+      dx = face[0, 0] - p[0]
+      dy = face[0, 1] - p[1]
+      dz = face[0, 2] - p[2]
+      t = (dx * normal[0] + dy * normal[1] + dz * normal[2]) / denom
+      if t <= tol or t >= best_t:
+        continue
+
+      hit = p + t * v
+      if _point_in_quad_numba(hit, face):
+        best_t = t
+        best_type = 10
+        best_point = hit
+        best_normal = normal
+
+    if abs(v[1]) > tol:
+      t_top = (top_y - p[1]) / v[1]
+      if t_top > tol and t_top < best_t:
+        hit = p + t_top * v
+        if _point_in_convex_polygon_numba(hit[0], hit[2], top_xz):
+          best_t, best_type, best_point = t_top, _BOUNCED_BACK, hit
+
+      t_bot = (bot_y - p[1]) / v[1]
+      if t_bot > tol and t_bot < best_t:
+        hit = p + t_bot * v
+        if _point_in_convex_polygon_numba(hit[0], hit[2], bot_xz):
+          best_t, best_type, best_point = t_bot, _ON_SENSOR, hit
+        else:
+          best_t, best_type, best_point = t_bot, _EXIT, hit
+
+    if best_type == -1:
+      return _EXIT
+
+    p = best_point
+
+    if best_type != 10:
+      return best_type
+
+    v = _reflect_numba(v, best_normal)
+
+  return _BOUNCE_LIMIT
+
 
 
 def propagate_hex(
@@ -152,14 +260,14 @@ def propagate_hex(
     best_normal = None
 
     for face, normal in zip(geom['faces'], geom['normals']):
-      denom = np.dot(v, normal)
+      denom = _dot3(v, normal)
       if abs(denom) <= tol:
         continue
-      t = np.dot(face[0] - p, normal) / denom
+      t = _dot3(face[0] - p, normal) / denom
       if t <= tol or t >= best_t:
         continue
       hit = p + t * v
-      if _point_in_quad(hit, face):
+      if _point_in_quad_numba(hit, face):
         best_t = t
         best_type = 'mirror'
         best_point = hit
@@ -169,13 +277,13 @@ def propagate_hex(
       t_top = (geom['top_y'] - p[1]) / v[1]
       if t_top > tol and t_top < best_t:
         hit = p + t_top * v
-        if _point_in_convex_polygon(hit[0], hit[2], geom['top_xz']):
+        if _point_in_convex_polygon_numba(hit[0], hit[2], geom['top_xz']):
           best_t, best_type, best_point = t_top, 'bounced back', hit
 
       t_bot = (geom['bot_y'] - p[1]) / v[1]
       if t_bot > tol and t_bot < best_t:
         hit = p + t_bot * v
-        if _point_in_convex_polygon(hit[0], hit[2], geom['bot_xz']):
+        if _point_in_convex_polygon_numba(hit[0], hit[2], geom['bot_xz']):
           best_t, best_type, best_point = t_bot, 'on sensor', hit
         else:
           best_t, best_type, best_point = t_bot, 'exit', hit
@@ -191,9 +299,61 @@ def propagate_hex(
     if best_type != 'mirror':
       return np.array(xs), np.array(ys), np.array(zs), best_type
 
-    v = _reflect(v, best_normal)
+    v = _reflect_numba(v, best_normal)
 
   return np.array(xs), np.array(ys), np.array(zs), 'bounce limit'
+
+
+def _sample_hex_aperture_points(top_xz: np.ndarray, radius: float, n_rays: int, rng: np.random.Generator) -> Tuple[np.ndarray, np.ndarray]:
+  x0s, z0s = [], []
+  while len(x0s) < n_rays:
+    xs_try = rng.uniform(-radius, radius, n_rays)
+    zs_try = rng.uniform(-radius, radius, n_rays)
+    for x_try, z_try in zip(xs_try, zs_try):
+      if _point_in_convex_polygon_numba(x_try, z_try, top_xz):
+        x0s.append(x_try)
+        z0s.append(z_try)
+        if len(x0s) >= n_rays:
+          break
+
+  return np.array(x0s), np.array(z0s)
+
+
+def _scan_one_angle_hex(
+    inc_angle: float,
+    geom: Dict[str, np.ndarray],
+    height: float,
+    n_rays: int,
+    radius: float,
+    seed: int,
+) -> Tuple[int, int]:
+  rng = np.random.default_rng(seed)
+  n_pass, n_entr = 0, 0
+  x0s, z0s = _sample_hex_aperture_points(geom['top_xz'], radius, n_rays, rng)
+
+  for x0, z0 in zip(x0s, z0s):
+    exit_code = _propagate_hex_exit_code(
+        x0,
+        height - 1,
+        z0,
+        inc_angle,
+        geom['faces'],
+        geom['normals'],
+        geom['top_xz'],
+        geom['bot_xz'],
+        geom['top_y'],
+        geom['bot_y'],
+    )
+    if exit_code == _ON_SENSOR:
+      n_pass += 1
+    elif exit_code == _BOUNCED_BACK:
+      n_entr += 1
+
+  return n_pass, n_entr
+
+
+def _scan_one_angle_hex_from_args(args: Tuple[float, Dict[str, np.ndarray], float, int, float, int]) -> Tuple[int, int]:
+  return _scan_one_angle_hex(*args)
 
 
 def parse_args() -> argparse.Namespace:
@@ -211,6 +371,8 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument('--scan-min', type=float, default=0, help='Minimum incident angle for scan (deg)')
   parser.add_argument('--scan-max', type=float, default=90, help='Maximum incident angle for scan (deg)')
   parser.add_argument('--scan-steps', type=int, default=200, help='Number of scan points')
+  parser.add_argument('--jobs', type=int, default=1,
+                      help='Number of processes for scan over incident angles (default: 1)')
   parser.add_argument('--y-knots', type=str, default='0.25,0.5,0.75',
                       help='Comma-separated knot positions along height [0..1] to place intermediate panels')
   parser.add_argument('--scale-knots', type=str, default='1.0,1.0,1.0',
@@ -220,7 +382,6 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == '__main__':
   args = parse_args()
-  hep.style.use(hep.style.CMS)
 
   y_knots = _parse_csv_floats(args.y_knots)
   scale_knots = _parse_csv_floats(args.scale_knots)
@@ -229,7 +390,25 @@ if __name__ == '__main__':
 
   geom = make_faceted_hex_geometry(args.din, args.dout, args.height, y_knots, scale_knots)
 
+  # Warm-up JIT once so the compile cost is paid upfront.
+  _ = _propagate_hex_exit_code(
+      0.0,
+      args.height - 1,
+      0.0,
+      args.inc_angle,
+      geom['faces'],
+      geom['normals'],
+      geom['top_xz'],
+      geom['bot_xz'],
+      geom['top_y'],
+      geom['bot_y'],
+  )
+
   if not args.quiet:
+    import matplotlib.pyplot as plt
+    import mplhep as hep
+
+    hep.style.use(hep.style.CMS)
     fig, axes = plt.subplots(1, 2, figsize=(15, 7))
     plt.tight_layout(pad=2.0)
 
@@ -251,7 +430,7 @@ if __name__ == '__main__':
     span = rmax * 0.9
     for x0 in np.linspace(-span, span, args.n_rays_vis):
       z0 = 0.0
-      if not _point_in_convex_polygon(x0, z0, geom['top_xz']):
+      if not _point_in_convex_polygon_numba(x0, z0, geom['top_xz']):
         continue
       xs, ys, zs, exit_type = propagate_hex(x0, args.height - 1, z0, args.inc_angle, geom)
       color = {'exit': 'b', 'bounced back': 'r', 'bounce limit': 'r', 'on sensor': 'g'}
@@ -271,31 +450,29 @@ if __name__ == '__main__':
   frac_entr = np.zeros(len(inc_angles))
 
   r = np.max(np.abs(geom['top_xz'])) * 0.9
-  for i, inc_angle in enumerate(tqdm(inc_angles)):
-    n_pass, n_entr = 0, 0
+  n_jobs = max(1, args.jobs)
+  seeds = np.random.SeedSequence(12345).generate_state(len(inc_angles), dtype=np.uint64)
 
-    x0s, z0s = [], []
-    while len(x0s) < args.n_rays:
-      xs_try = np.random.uniform(-r, r, args.n_rays)
-      zs_try = np.random.uniform(-r, r, args.n_rays)
-      for x_try, z_try in zip(xs_try, zs_try):
-        if _point_in_convex_polygon(x_try, z_try, geom['top_xz']):
-          x0s.append(x_try)
-          z0s.append(z_try)
-          if len(x0s) >= args.n_rays:
-            break
+  if n_jobs == 1:
+    iterator = zip(inc_angles, seeds)
+    for i, (inc_angle, seed) in enumerate(tqdm(iterator, total=len(inc_angles))):
+      n_pass, n_entr = _scan_one_angle_hex(inc_angle, geom, args.height, args.n_rays, r, int(seed))
+      frac_pass[i] = n_pass / args.n_rays
+      frac_entr[i] = n_entr / args.n_rays
+  else:
+    max_workers = min(n_jobs, os.cpu_count() or 1)
+    tasks = [(float(ang), geom, args.height, args.n_rays, r, int(seed))
+             for ang, seed in zip(inc_angles, seeds)]
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+      results = list(tqdm(executor.map(_scan_one_angle_hex_from_args, tasks), total=len(tasks)))
 
-    for x0, z0 in zip(x0s, z0s):
-      _, _, _, exit_type = propagate_hex(x0, args.height - 1, z0, inc_angle, geom)
-      if exit_type == 'on sensor':
-        n_pass += 1
-      elif exit_type == 'bounced back':
-        n_entr += 1
-
-    frac_pass[i] = n_pass / args.n_rays
-    frac_entr[i] = n_entr / args.n_rays
+    for i, (n_pass, n_entr) in enumerate(results):
+      frac_pass[i] = n_pass / args.n_rays
+      frac_entr[i] = n_entr / args.n_rays
 
   if not args.quiet:
+    import matplotlib.pyplot as plt
+
     plt.plot(inc_angles, frac_pass, 'b.-', label='on sensor')
     plt.plot(inc_angles, frac_entr, 'r.-', label='bounced back')
     plt.xlabel('Incident angle (deg)')
