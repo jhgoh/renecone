@@ -20,7 +20,6 @@ _EXIT = 0
 _BOUNCED_BACK = 1
 _ON_SENSOR = 2
 _BOUNCE_LIMIT = 3
-_ESCAPED = 4
 _MIRROR = 10
 
 
@@ -71,44 +70,28 @@ def _propagate_cone_exit_code(
         bestX, bestY, bestZ = x[irmin], y[irmin], z[irmin]
         bestType = _ON_SENSOR
 
-    if bestType == -1:
-      x, y, z, _, _, _ = findSegments(
-          x0,
-          y0,
-          z0,
-          vx,
-          vy,
-          vz,
-          np.array([0.0, 2.0 * rmax]),
-          np.array([1.1 * ymax, 1.1 * ymax]),
-      )
-      if x.shape[0] > 0:
-        r = getDist(x0, y0, z0, x, y, z, vx, vy, vz)
-        irmin = np.argmin(r)
-        bestR = r[irmin]
-        bestX, bestY, bestZ = x[irmin], y[irmin], z[irmin]
-        bestType = _BOUNCED_BACK
+    if bestType == -1 and abs(vy) > tol:
+      t_back = (1.1 * ymax - y0) / vy
+      if t_back > tol:
+        x_back = x0 + t_back * vx
+        z_back = z0 + t_back * vz
+        w_back = np.hypot(x_back, z_back)
+        if w_back <= 2.0 * rmax + tol:
+          bestX, bestY, bestZ = x_back, 1.1 * ymax, z_back
+          bestType = _BOUNCED_BACK
+
+    if bestType == -1 and abs(vy) > tol:
+      t_exit = -y0 / vy
+      if t_exit > tol:
+        x_exit = x0 + t_exit * vx
+        z_exit = z0 + t_exit * vz
+        w_exit = np.hypot(x_exit, z_exit)
+        if w_exit <= 2.0 * rmax + tol:
+          bestX, bestY, bestZ = x_exit, 0.0, z_exit
+          bestType = _EXIT
 
     if bestType == -1:
-      x, y, z, _, _, _ = findSegments(
-          x0,
-          y0,
-          z0,
-          vx,
-          vy,
-          vz,
-          np.array([0.0, 2.0 * rmax]),
-          np.array([0.0, 0.0]),
-      )
-      if x.shape[0] > 0:
-        r = getDist(x0, y0, z0, x, y, z, vx, vy, vz)
-        irmin = np.argmin(r)
-        bestR = r[irmin]
-        bestX, bestY, bestZ = x[irmin], y[irmin], z[irmin]
-        bestType = _EXIT
-
-    if bestType == -1:
-      return _ESCAPED
+      return _EXIT
 
     x0, y0, z0 = bestX, bestY, bestZ
 
@@ -169,9 +152,9 @@ def _scan_one_angle_cone(
     ymax: float,
     n_rays: int,
     seed: int,
-) -> Tuple[int, int, int]:
+) -> Tuple[int, int]:
   rng = np.random.default_rng(seed)
-  n_pass, n_entr, n_esc = 0, 0, 0
+  n_pass, n_entr = 0, 0
 
   theta0s = rng.uniform(0, 2 * np.pi, n_rays)
   r0s = radius * np.sqrt(rng.uniform(0, 1, n_rays))
@@ -195,15 +178,13 @@ def _scan_one_angle_cone(
       n_pass += 1
     elif exit_code == _BOUNCED_BACK:
       n_entr += 1
-    elif exit_code == _ESCAPED:
-      n_esc += 1
 
-  return n_pass, n_entr, n_esc
+  return n_pass, n_entr
 
 
 def _scan_one_angle_cone_from_args(
     args: Tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float, float, float, int, int]
-) -> Tuple[int, int, int]:
+) -> Tuple[int, int]:
   return _scan_one_angle_cone(*args)
 
 @njit(cache=True)
@@ -537,7 +518,6 @@ if __name__ == '__main__':
   inc_angles = np.linspace(args.scan_min, args.scan_max, args.scan_steps)
   frac_pass = np.zeros(len(inc_angles))
   frac_entr = np.zeros(len(inc_angles))
-  frac_esc = np.zeros(len(inc_angles))
 
   n_jobs = max(1, args.jobs)
   seeds = np.random.SeedSequence(12345).generate_state(len(inc_angles), dtype=np.uint64)
@@ -545,7 +525,7 @@ if __name__ == '__main__':
   if n_jobs == 1:
     iterator = zip(inc_angles, seeds)
     for i, (inc_angle, seed) in enumerate(tqdm(iterator, total=len(inc_angles))):
-      n_pass, n_entr, n_esc = _scan_one_angle_cone(
+      n_pass, n_entr = _scan_one_angle_cone(
           inc_angle,
           mirror_ws,
           mirror_hs,
@@ -561,7 +541,6 @@ if __name__ == '__main__':
       )
       frac_pass[i] = n_pass / par_n_rays
       frac_entr[i] = n_entr / par_n_rays
-      frac_esc[i] = n_esc / par_n_rays
   else:
     max_workers = min(n_jobs, os.cpu_count() or 1)
     tasks = [
@@ -571,10 +550,9 @@ if __name__ == '__main__':
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
       results = list(tqdm(executor.map(_scan_one_angle_cone_from_args, tasks), total=len(tasks)))
 
-    for i, (n_pass, n_entr, n_esc) in enumerate(results):
+    for i, (n_pass, n_entr) in enumerate(results):
       frac_pass[i] = n_pass / par_n_rays
       frac_entr[i] = n_entr / par_n_rays
-      frac_esc[i] = n_esc / par_n_rays
 
   if not args.quiet:
     plt.plot(inc_angles, frac_pass, 'b.-', label='on sensor')
@@ -587,6 +565,6 @@ if __name__ == '__main__':
 
   with open(args.output, 'w', newline='') as csvfile:
     writer = csv.writer(csvfile)
-    writer.writerow(['inc_angle_deg', 'fraction_on_sensor', 'fraction_bounced_back', 'fraction_escaped'])
-    for angle, frac_on_sensor, frac_bounced, frac_escaped in zip(inc_angles, frac_pass, frac_entr, frac_esc):
-      writer.writerow([angle, frac_on_sensor, frac_bounced, frac_escaped])
+    writer.writerow(['inc_angle_deg', 'fraction_on_sensor', 'fraction_bounced_back'])
+    for angle, frac_on_sensor, frac_bounced in zip(inc_angles, frac_pass, frac_entr):
+      writer.writerow([angle, frac_on_sensor, frac_bounced])
