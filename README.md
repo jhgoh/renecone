@@ -14,9 +14,11 @@ library:
   traces sample rays through the profile. Core geometric routines are
   accelerated with [Numba](https://numba.pydata.org/) so that scans across many
   incident angles complete quickly.
-- **`run_3Dcone.py`** – demonstrates a simple 3D extension of the cone profile
-  and performs similar ray‑tracing studies using matplotlib's 3D plotting
-  utilities.
+- **`run_3Dcone.py`** – rotationally symmetric 3D cone/Winston demonstration
+  with ray-tracing scans.
+- **`run_3Dhex.py`** – hexagonal entrance/exit concentrator using faceted side
+  panels. Side shape is controlled by intermediate knot positions and scale
+  factors so you can run panel-optimization studies.
 - **`python/ConeProfile.py`** – shared utilities that generate the mirrors and
   optional sensor surfaces used by both example scripts.
 
@@ -41,7 +43,8 @@ written:
 
 ```bash
 python run_2D.py -o results_2d.csv         # 2D profile
-python run_3Dcone.py -o results_3d.csv     # 3D demonstration
+python run_3Dcone.py -o results_3d.csv     # rotational 3D model
+python run_3Dhex.py -o results_hex.csv      # hexagonal faceted 3D model
 ```
 
 The CSV files contain the incident angle (in degrees) together with the
@@ -55,6 +58,7 @@ non-interactive matplotlib backend:
 ```bash
 MPLBACKEND=Agg python run_2D.py
 MPLBACKEND=Agg python run_3Dcone.py
+MPLBACKEND=Agg python run_3Dhex.py
 ```
 
 The scripts will open a window (or generate an off‑screen figure) displaying the
@@ -64,7 +68,7 @@ quick way to evaluate performance.
 
 ### Helpful command-line options
 
-Both scripts expose the same set of arguments:
+`run_2D.py` and `run_3Dcone.py` expose the following shared arguments:
 
 - `-o / --output` (required) – destination CSV file for the scan summary.
 - `-q / --quiet` – skip the matplotlib visualisations and run only the scan
@@ -89,6 +93,15 @@ Both scripts expose the same set of arguments:
 - `--scan-steps` – number of scan points between the minimum and maximum angles
   (default: 200 steps).
 
+
+`run_3Dhex.py` uses the common scan controls (`-o`, `-q`, `--height`, `--din`, `--dout`, `--n-rays-vis`, `--n-rays`, `--inc-angle`, `--scan-min`, `--scan-max`, `--scan-steps`) and adds:
+
+- `--y-knots` – comma-separated y positions in normalized height `[0, 1]` where
+  intermediate ring sections are created (default: `0.25,0.5,0.75`).
+- `--scale-knots` – comma-separated radial multipliers at the same knot
+  positions (default: `1.0,1.0,1.0`). Endpoints are fixed to 1.0 so entry/exit
+  apertures remain at `din`/`dout`.
+
 ## Customisation tips
 
 Key parameters such as input/output diameters, mirror angles and sensor
@@ -99,6 +112,9 @@ different configurations. For more involved studies, you can:
 - Pass `--mirror-type planar` to preview a simple flat-mirror concentrator in
   place of the default Winston profile. For bespoke geometries, edit the script
   to call your own helper routine.
+- For hexagonal entry/exit studies with multiple flat side panels, use
+  `python run_3Dhex.py` and tune `--y-knots` / `--scale-knots` to adjust
+  intermediate panel positions and widths.
 - Adjust `par_n_rays` and `par_n_rays_vis` to trade off runtime versus plotting
   density.
 - Inspect the `propagate` function to see how ray histories are stored if you
