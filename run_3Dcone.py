@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import argparse
 import csv
+import os
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,6 +16,176 @@ sys.path.append('python')
 from ConeProfile import *
 
 tol: float = 1e-7  # Numerical tolerance
+_EXIT = 0
+_BOUNCED_BACK = 1
+_ON_SENSOR = 2
+_BOUNCE_LIMIT = 3
+_MIRROR = 10
+
+
+@njit(cache=True)
+def _propagate_cone_exit_code(
+    x0: float,
+    y0: float,
+    z0: float,
+    angle: float,
+    mirror_ws: np.ndarray,
+    mirror_hs: np.ndarray,
+    mirror_lens: np.ndarray,
+    sx: np.ndarray,
+    sy: np.ndarray,
+    rmax: float,
+    ymax: float,
+    n_bounces: int = 20,
+) -> int:
+  rad = np.deg2rad(angle - 90)
+  vx, vy, vz = np.cos(rad), np.sin(rad), 0.0
+
+  for _ in range(n_bounces):
+    bestR = np.inf
+    bestX, bestY, bestZ = x0, y0, z0
+    bestType = -1
+    bestNx, bestNy, bestNz = 0.0, 0.0, 0.0
+
+    for i in range(mirror_ws.shape[0]):
+      n = mirror_lens[i]
+      mw = mirror_ws[i, :n]
+      mh = mirror_hs[i, :n]
+      x, y, z, nx, ny, nz = findSegments(x0, y0, z0, vx, vy, vz, mw, mh)
+      if x.shape[0] > 0:
+        r = getDist(x0, y0, z0, x, y, z, vx, vy, vz)
+        irmin = np.argmin(r)
+        if r[irmin] < bestR:
+          bestR = r[irmin]
+          bestX, bestY, bestZ = x[irmin], y[irmin], z[irmin]
+          bestType = _MIRROR
+          bestNx, bestNy, bestNz = nx[irmin], ny[irmin], nz[irmin]
+
+    x, y, z, nx, ny, nz = findSegments(x0, y0, z0, vx, vy, vz, sx, sy)
+    if x.shape[0] > 0:
+      r = getDist(x0, y0, z0, x, y, z, vx, vy, vz)
+      irmin = np.argmin(r)
+      if r[irmin] < bestR:
+        bestR = r[irmin]
+        bestX, bestY, bestZ = x[irmin], y[irmin], z[irmin]
+        bestType = _ON_SENSOR
+
+    if bestType == -1 and abs(vy) > tol:
+      t_back = (1.1 * ymax - y0) / vy
+      if t_back > tol:
+        x_back = x0 + t_back * vx
+        z_back = z0 + t_back * vz
+        w_back = np.hypot(x_back, z_back)
+        if w_back <= 2.0 * rmax + tol:
+          bestX, bestY, bestZ = x_back, 1.1 * ymax, z_back
+          bestType = _BOUNCED_BACK
+
+    if bestType == -1 and abs(vy) > tol:
+      t_exit = -y0 / vy
+      if t_exit > tol:
+        x_exit = x0 + t_exit * vx
+        z_exit = z0 + t_exit * vz
+        w_exit = np.hypot(x_exit, z_exit)
+        if w_exit <= 2.0 * rmax + tol:
+          bestX, bestY, bestZ = x_exit, 0.0, z_exit
+          bestType = _EXIT
+
+    if bestType == -1:
+      return _EXIT
+
+    x0, y0, z0 = bestX, bestY, bestZ
+
+    if bestType != _MIRROR:
+      return bestType
+
+    vx, vy, vz = reflect(vx, vy, vz, bestNx, bestNy, bestNz)
+
+  return _BOUNCE_LIMIT
+
+
+def _prepare_numba_geometry(
+    mirrors: List[Dict[str, Sequence[float]]],
+    sensor: Dict[str, Sequence[float]],
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
+  mws: List[np.ndarray] = []
+  mhs: List[np.ndarray] = []
+  lens: List[int] = []
+  rmax = 0.0
+  ymax = 0.0
+
+  for mirror in mirrors:
+    mw = np.abs(np.array(mirror['x'], dtype=np.float64))
+    mh = np.array(mirror['y'], dtype=np.float64)
+    mws.append(mw)
+    mhs.append(mh)
+    lens.append(len(mw))
+    rmax = max(rmax, float(np.max(mw)))
+    ymax = max(ymax, float(np.max(mh)))
+
+  max_len = max(lens)
+  mirror_ws = np.zeros((len(mws), max_len), dtype=np.float64)
+  mirror_hs = np.zeros((len(mhs), max_len), dtype=np.float64)
+  mirror_lens = np.array(lens, dtype=np.int64)
+
+  for i, (mw, mh) in enumerate(zip(mws, mhs)):
+    mirror_ws[i, :len(mw)] = mw
+    mirror_hs[i, :len(mh)] = mh
+
+  sx = np.abs(np.array(sensor['x'], dtype=np.float64))
+  sy = np.array(sensor['y'], dtype=np.float64)
+  rmax = max(rmax, float(np.max(sx)))
+  ymax = max(ymax, float(np.max(sy)))
+
+  return mirror_ws, mirror_hs, mirror_lens, sx, sy, rmax, ymax
+
+
+def _scan_one_angle_cone(
+    inc_angle: float,
+    mirror_ws: np.ndarray,
+    mirror_hs: np.ndarray,
+    mirror_lens: np.ndarray,
+    sx: np.ndarray,
+    sy: np.ndarray,
+    height: float,
+    radius: float,
+    rmax: float,
+    ymax: float,
+    n_rays: int,
+    seed: int,
+) -> Tuple[int, int]:
+  rng = np.random.default_rng(seed)
+  n_pass, n_entr = 0, 0
+
+  theta0s = rng.uniform(0, 2 * np.pi, n_rays)
+  r0s = radius * np.sqrt(rng.uniform(0, 1, n_rays))
+  x0s, z0s = r0s * np.cos(theta0s), r0s * np.sin(theta0s)
+
+  for x0, z0 in zip(x0s, z0s):
+    exit_code = _propagate_cone_exit_code(
+        z0,
+        height - 1,
+        x0,
+        inc_angle,
+        mirror_ws,
+        mirror_hs,
+        mirror_lens,
+        sx,
+        sy,
+        rmax,
+        ymax,
+    )
+    if exit_code == _ON_SENSOR:
+      n_pass += 1
+    elif exit_code == _BOUNCED_BACK:
+      n_entr += 1
+
+  return n_pass, n_entr
+
+
+def _scan_one_angle_cone_from_args(
+    args: Tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float, float, float, int, int]
+) -> Tuple[int, int]:
+  return _scan_one_angle_cone(*args)
 
 @njit(cache=True)
 def findSegments(
@@ -241,6 +413,8 @@ def parse_args() -> argparse.Namespace:
                       help='Maximum incident angle for the scan (deg)')
   parser.add_argument('--scan-steps', type=int, default=200,
                       help='Number of scan points between min and max angles')
+  parser.add_argument('--jobs', type=int, default=1,
+                      help='Number of processes for scan over incident angles (default: 1)')
 
   return parser.parse_args()
 
@@ -269,6 +443,24 @@ if __name__ == '__main__':
   config['sensor'] = make_sensor(par_dout, sensor_curv=par_sensor_curv, n_points=32, sides=['right'])
 
   radius = config['din'] / 2 * 0.9
+  mirror_ws, mirror_hs, mirror_lens, sx, sy, rmax_scan, ymax_scan = _prepare_numba_geometry(
+      config['mirrors'], config['sensor']
+  )
+
+  # Warm-up JIT once to pay compile cost upfront.
+  _ = _propagate_cone_exit_code(
+      0.0,
+      par_height - 1,
+      0.0,
+      vis_inc_angle,
+      mirror_ws,
+      mirror_hs,
+      mirror_lens,
+      sx,
+      sy,
+      rmax_scan,
+      ymax_scan,
+  )
 
   if not args.quiet:
     fig, axes = plt.subplots(1, 2, figsize=(15, 7))
@@ -326,22 +518,41 @@ if __name__ == '__main__':
   inc_angles = np.linspace(args.scan_min, args.scan_max, args.scan_steps)
   frac_pass = np.zeros(len(inc_angles))
   frac_entr = np.zeros(len(inc_angles))
-  for i, inc_angle in enumerate(tqdm(inc_angles)):
-    n_pass, n_entr = 0, 0
 
-    theta0s = np.random.uniform(0, 2 * np.pi, par_n_rays)
-    r0s = radius * np.sqrt(np.random.uniform(0, 1, par_n_rays))
-    x0s, z0s = r0s * np.cos(theta0s), r0s * np.sin(theta0s)
+  n_jobs = max(1, args.jobs)
+  seeds = np.random.SeedSequence(12345).generate_state(len(inc_angles), dtype=np.uint64)
 
-    for x0, z0 in zip(x0s, z0s):
-      xs, ys, zs, exit_type = propagate(z0, par_height - 1, x0, inc_angle,
-                                         config['mirrors'], sensor=config['sensor'])
-      if exit_type == 'on sensor':
-        n_pass += 1
-      elif exit_type == 'bounced back':
-        n_entr += 1
-    frac_pass[i] = n_pass / par_n_rays
-    frac_entr[i] = n_entr / par_n_rays
+  if n_jobs == 1:
+    iterator = zip(inc_angles, seeds)
+    for i, (inc_angle, seed) in enumerate(tqdm(iterator, total=len(inc_angles))):
+      n_pass, n_entr = _scan_one_angle_cone(
+          inc_angle,
+          mirror_ws,
+          mirror_hs,
+          mirror_lens,
+          sx,
+          sy,
+          par_height,
+          radius,
+          rmax_scan,
+          ymax_scan,
+          par_n_rays,
+          int(seed),
+      )
+      frac_pass[i] = n_pass / par_n_rays
+      frac_entr[i] = n_entr / par_n_rays
+  else:
+    max_workers = min(n_jobs, os.cpu_count() or 1)
+    tasks = [
+        (float(inc_angle), mirror_ws, mirror_hs, mirror_lens, sx, sy, par_height, radius, rmax_scan, ymax_scan, par_n_rays, int(seed))
+        for inc_angle, seed in zip(inc_angles, seeds)
+    ]
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+      results = list(tqdm(executor.map(_scan_one_angle_cone_from_args, tasks), total=len(tasks)))
+
+    for i, (n_pass, n_entr) in enumerate(results):
+      frac_pass[i] = n_pass / par_n_rays
+      frac_entr[i] = n_entr / par_n_rays
 
   if not args.quiet:
     plt.plot(inc_angles, frac_pass, 'b.-', label='on sensor')
@@ -356,4 +567,3 @@ if __name__ == '__main__':
     writer.writerow(['inc_angle_deg', 'fraction_on_sensor', 'fraction_bounced_back'])
     for angle, frac_on_sensor, frac_bounced in zip(inc_angles, frac_pass, frac_entr):
       writer.writerow([angle, frac_on_sensor, frac_bounced])
-
